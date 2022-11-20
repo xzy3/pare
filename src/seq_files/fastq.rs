@@ -32,6 +32,8 @@ pub enum FastQFileError {
     InvalidNucleotideLetter,
     #[error("EOF caused Incomplete record")]
     IncompleteRecord,
+    #[error("Found FASTA style title (title started with a '>'). Expected FASTQ files.")]
+    FastATitleLine,
 }
 
 /// Fastq file things
@@ -53,6 +55,9 @@ impl<R> FastQFile<R>
         }
 
         if !title.starts_with("@") {
+            if title.starts_with(">") {
+                return Err(FastQFileError::FastATitleLine);
+            }
             return Err(FastQFileError::NoTitleLine);
         }
         title = title[1..].trim_end().to_string();
@@ -272,20 +277,74 @@ mod tests {
         assert!(matches!(actual.unwrap_err(), FastQFileError::InvalidQualityLetter));
     }
 
-    const FASTQ_RECORD_TRUNCATED: &str = concat!( "@HWI-EAS209_0006_FC706VJ:5:58:5894:21141#ATCACG/1\n",
+    const FASTQ_RECORD_TRUNCATED_QUALITY: &str = concat!(
+        "@HWI-EAS209_0006_FC706VJ:5:58:5894:21141#ATCACG/1\n",
         "TTAATTGGTAAATAAATCTCCTAATAGCTTAGATNTTACCTTNNNNNNNNNTAGTTTCTTGAGATTTGTTGGGGGAGACATTTTTGTGATTGCCTTGAT\n",
         "+HWI-EAS209_0006_FC706VJ:5:58:5894:21141#ATCACG/1\n",
+    );
+
+    const FASTQ_RECORD_TRUNCATED_DESCRIPTION: &str = concat!(
+        "@HWI-EAS209_0006_FC706VJ:5:58:5894:21141#ATCACG/1\n",
+        "TTAATTGGTAAATAAATCTCCTAATAGCTTAGATNTTACCTTNNNNNNNNNTAGTTTCTTGAGATTTGTTGGGGGAGACATTTTTGTGATTGCCTTGAT\n",
+    );
+
+    const FASTQ_RECORD_TRUNCATED_NUCLEOTIDES: &str = concat!(
+        "@HWI-EAS209_0006_FC706VJ:5:58:5894:21141#ATCACG/1\n",
     );
 
     #[test]
     fn test_truncated() {
         let mut reader = FastQFile {
-            file_obj: BufReader::new(FASTQ_RECORD_TRUNCATED.as_bytes())
+            file_obj: BufReader::new(FASTQ_RECORD_TRUNCATED_QUALITY.as_bytes())
         };
         let mut seq = FastQRead::default();
 
         let actual = reader.read_next(&mut seq);
         assert!(actual.is_err());
         assert!(matches!(actual.unwrap_err(), FastQFileError::IncompleteRecord));
+
+        let mut reader = FastQFile {
+            file_obj: BufReader::new(FASTQ_RECORD_TRUNCATED_DESCRIPTION.as_bytes())
+        };
+        let mut seq = FastQRead::default();
+
+        let actual = reader.read_next(&mut seq);
+        assert!(actual.is_err());
+        assert!(matches!(actual.unwrap_err(), FastQFileError::IncompleteRecord));
+
+        let mut reader = FastQFile {
+            file_obj: BufReader::new(FASTQ_RECORD_TRUNCATED_NUCLEOTIDES.as_bytes())
+        };
+        let mut seq = FastQRead::default();
+
+        let actual = reader.read_next(&mut seq);
+        assert!(actual.is_err());
+        assert!(matches!(actual.unwrap_err(), FastQFileError::IncompleteRecord));
+    }
+
+    const FASTQ_RECORD_FASTA_RECORD: &str = concat!(
+        "@HWI-EAS209_0006_FC706VJ:5:58:5894:21141#ATCACG/1\n",
+        "TTAATTGGTAAATAAATCTCCTAATAGCTTAGATNTTACCTTNNNNNNNNNNTAGTTTCTTGAGATTTGTTGGGGGAGACATTTTTGTGATTGCCTTGAT\n",
+        "+HWI-EAS209_0006_FC706VJ:5:58:5894:21141#ATCACG/1\n",
+        "efcfffffcfeefffcffffffddf`feed]`]_Ba_^__[YBBBBBBBBBBRTT\\]][]dddd`ddd^dddadd^BBBBBBBBBBBBBBBBBBBBBBBB\n",
+        ">HWI-EAS209_0006_FC706VJ:5:58:5894:21141#ATCACG/1\n",
+        "TTAATTGGTAAATAAATCTCCTAATAGCTTAGATNTTACCTTNNNNNNNNNNTAGTTTCTTGAGATTTGTTGGGGGAGACATTTTTGTGATTGCCTTGAT\n",
+    );
+
+    #[test]
+    fn test_fasta_record() -> Result<(), FastQFileError> {
+        let mut reader = FastQFile {
+            file_obj: BufReader::new(FASTQ_RECORD_FASTA_RECORD.as_bytes())
+        };
+        let mut seq = FastQRead::default();
+
+        assert_eq!(true, reader.read_next(&mut seq)?);
+        assert_eq!(seq.title, "HWI-EAS209_0006_FC706VJ:5:58:5894:21141#ATCACG/1");
+
+        let actual = reader.read_next(&mut seq);
+        assert!(actual.is_err());
+        assert!(matches!(actual.unwrap_err(), FastQFileError::FastATitleLine));
+
+        Ok(())
     }
 }
