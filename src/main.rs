@@ -6,7 +6,7 @@ use clap::{Parser, Subcommand};
 
 #[derive(Debug, Parser)]
 #[command(name = "pare")]
-#[command(about = "Compresion algorithm for fastq files", long_about = None)]
+#[command(about = "Compression algorithm for fastq files", long_about = None)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -17,17 +17,17 @@ enum Commands {
     /// compress fastq file(s)
     #[command(arg_required_else_help = true)]
     Compress {
-        #[arg(short, long, default_missing_value="-")]
+        #[arg(short, long, default_missing_value = "-")]
         output: Option<PathBuf>,
-        #[arg(required=true)]
-        files: Vec<PathBuf>
+        #[arg(required = true)]
+        files: Vec<PathBuf>,
     },
     #[command(arg_required_else_help = true)]
     Decompress {
-        #[arg(short, long, default_missing_value="-")]
+        #[arg(short, long, default_missing_value = "-")]
         output: Option<PathBuf>,
-        file: PathBuf
-    }
+        file: PathBuf,
+    },
 }
 
 fn main() {
@@ -36,7 +36,7 @@ fn main() {
     match args.command {
         Commands::Compress { files, output } => {
             println!("files: {:?} {:?}", files, output);
-        },
+        }
         Commands::Decompress { file, output } => {
             println!("decompress files {:?} {:?}", file, output);
         }
