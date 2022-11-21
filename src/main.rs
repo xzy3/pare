@@ -23,6 +23,8 @@ enum Commands {
         output: Option<OsString>,
         #[arg(required = true, num_args(1..3))]
         files: Vec<OsString>,
+        #[arg(short, long, action, help = "Don't reverse complement R2")]
+        reverse_r2: bool,
     },
     #[command(arg_required_else_help = true)]
     Decompress {
@@ -38,12 +40,16 @@ fn main() -> Result<(), FastQFileError> {
     let args = Cli::parse();
 
     match args.command {
-        Commands::Compress { files, output } => match files.len() {
+        Commands::Compress {
+            files,
+            output,
+            reverse_r2,
+        } => match files.len() {
             1 => {
-                println!("interleaved {:?} {:?}", files[0], output);
+                println!("interleaved {:?} {:?} {}", files[0], output, reverse_r2);
             }
             2 => {
-                println!("paired files {:?} {:?}", files, output);
+                println!("paired files {:?} {:?} {}", files, output, reverse_r2);
             }
             _ => panic!("Too many input files! programming error."),
         },
