@@ -1,6 +1,8 @@
 use thiserror::Error;
 
+use std::fs::File;
 use std::io::BufReader;
+use std::path::Path;
 
 use std::io::prelude::*;
 use std::vec::Vec;
@@ -37,14 +39,12 @@ pub enum FastQFileError {
 }
 
 /// Fastq file things
-pub struct FastQFile<R: BufRead> {
-    file_obj: R,
+#[derive(Debug)]
+pub struct FastQFile<R: Read> {
+    file_obj: BufReader<R>,
 }
 
-impl<R> FastQFile<R>
-where
-    R: BufRead,
-{
+impl<R: Read> FastQFile<R> {
     pub fn read_next(&mut self, buf: &mut FastQRead) -> Result<bool, FastQFileError> {
         let mut title = String::new();
         let mut nucleotides = String::new();
@@ -114,6 +114,23 @@ where
             sub_title: sub_title,
         };
         return Ok(true);
+    }
+}
+
+impl FastQFile<File> {
+    pub fn open<P: AsRef<Path>>(path: &P) -> Result<Self, std::io::Error> {
+        let file = File::open(path)?;
+        Ok(FastQFile {
+            file_obj: BufReader::new(file),
+        })
+    }
+}
+
+impl FastQFile<std::io::Stdin> {
+    pub fn from_stdin() -> Self {
+        FastQFile {
+            file_obj: BufReader::new(std::io::stdin()),
+        }
     }
 }
 
