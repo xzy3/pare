@@ -15,6 +15,33 @@ pub struct FastQRead {
     sub_title: String,
 }
 
+impl FastQRead {
+    pub fn new(title: &str) -> Self {
+        let mut read = Self::default();
+
+        read.title = String::from(title);
+        read
+    }
+
+    pub fn reverse_complement_nucleotides(&mut self) {
+        let letters: Vec<u8> = self
+            .letters
+            .iter()
+            .rev()
+            .map(|n| match n {
+                0 => 0,
+                1 => 2,
+                2 => 1,
+                3 => 4,
+                4 => 3,
+                _ => panic!("Invalid nuceotide {} found!", n),
+            })
+            .collect();
+
+        self.letters = letters;
+    }
+}
+
 #[derive(Error, Debug)]
 pub enum FastQFileError {
     #[error("IO error while reading fastq file")]
@@ -30,12 +57,28 @@ pub enum FastQFileError {
     InvalidQualityLetter,
     #[error("The nucleotide sequence and the quality sequence are different lengths")]
     MismatchedSequenceLength,
-    #[error("Found nucleotide that is not |ATCGNatcgn|")]
-    InvalidNucleotideLetter,
+    #[error("Found nucleotide {c} that is not |ATCGNatcgn|")]
+    InvalidNucleotideLetter { c: char },
     #[error("EOF caused Incomplete record")]
     IncompleteRecord,
     #[error("Found FASTA style title (title started with a '>'). Expected FASTQ files.")]
     FastATitleLine,
+}
+
+fn nuc_string_to_vec(letters: &str) -> Result<Vec<u8>, FastQFileError> {
+    let mut ret: Vec<u8> = Vec::with_capacity(letters.len());
+    for n in letters.chars() {
+        match n {
+            'n' | 'N' => ret.push(0),
+            'a' | 'A' => ret.push(1),
+            't' | 'T' => ret.push(2),
+            'c' | 'C' => ret.push(3),
+            'g' | 'G' => ret.push(4),
+            _ => return Err(FastQFileError::InvalidNucleotideLetter { c: n }),
+        }
+    }
+
+    Ok(ret)
 }
 
 /// Fastq file things
@@ -68,22 +111,7 @@ impl<R: Read> FastQFile<R> {
         }
 
         nucleotides = nucleotides.trim_end().to_string();
-        let letters: Result<Vec<u8>, FastQFileError> = nucleotides
-            .trim_end()
-            .chars()
-            .map(|n| match n {
-                'n' | 'N' => Ok(0),
-                'a' | 'A' => Ok(1),
-                't' | 'T' => Ok(2),
-                'c' | 'C' => Ok(3),
-                'g' | 'G' => Ok(4),
-                _ => return Err(FastQFileError::InvalidNucleotideLetter),
-            })
-            .collect();
-        if letters.is_err() {
-            return Err(letters.unwrap_err());
-        }
-
+        let letters: Vec<u8> = nuc_string_to_vec(&nucleotides)?;
         if self.file_obj.read_line(&mut sub_title)? == 0 {
             return Err(FastQFileError::IncompleteRecord);
         }
@@ -108,7 +136,7 @@ impl<R: Read> FastQFile<R> {
         let qualities: Vec<u8> = quality_letters.bytes().map(|v| v - 32).collect();
 
         *buf = FastQRead {
-            letters: letters.unwrap(),
+            letters: letters,
             qualities: qualities,
             title: title,
             sub_title: sub_title,
@@ -137,6 +165,29 @@ impl FastQFile<std::io::Stdin> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_reverse_complement_nucleotides() {
+        let mut read = FastQRead::default();
+        read.letters = [
+            2, 2, 1, 1, 2, 2, 4, 4, 2, 1, 1, 1, 2, 1, 1, 1, 2, 3, 2, 3, 3, 2, 1, 1, 2, 1, 4, 3, 2,
+            2, 1, 4, 1, 2, 0, 2, 2, 1, 3, 3, 2, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 1, 4, 2, 2, 2,
+            3, 2, 2, 4, 1, 4, 1, 2, 2, 2, 4, 2, 2, 4, 4, 4, 4, 4, 1, 4, 1, 3, 1, 2, 2, 2, 2, 2, 4,
+            2, 4, 1, 2, 2, 4, 3, 3, 2, 2, 4, 1, 2,
+        ]
+        .to_vec();
+        read.reverse_complement_nucleotides();
+
+        assert_eq!(
+            read.letters,
+            [
+                1, 2, 3, 1, 1, 4, 4, 3, 1, 1, 2, 3, 1, 3, 1, 1, 1, 1, 1, 2, 4, 2, 3, 2, 3, 3, 3, 3,
+                3, 1, 1, 3, 1, 1, 1, 2, 3, 2, 3, 1, 1, 4, 1, 1, 1, 3, 2, 1, 0, 0, 0, 0, 0, 0, 0, 0,
+                0, 0, 1, 1, 4, 4, 2, 1, 1, 0, 1, 2, 3, 2, 1, 1, 4, 3, 2, 1, 2, 2, 1, 4, 4, 1, 4, 1,
+                2, 2, 2, 1, 2, 2, 2, 1, 3, 3, 1, 1, 2, 2, 1, 1
+            ]
+        );
+    }
 
     const FASTQ_RECORD: &str = concat!(
         "@HWI-EAS209_0006_FC706VJ:5:58:5894:21141#ATCACG/1\n",
@@ -299,7 +350,7 @@ mod tests {
         assert!(actual.is_err());
         assert!(matches!(
             actual.unwrap_err(),
-            FastQFileError::InvalidNucleotideLetter
+            FastQFileError::InvalidNucleotideLetter { c: 'z' }
         ));
     }
 
