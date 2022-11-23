@@ -85,9 +85,17 @@ fn nuc_string_to_vec(letters: &str) -> Result<Vec<u8>, FastQFileError> {
 #[derive(Debug)]
 pub struct FastQFile<R: Read> {
     file_obj: BufReader<R>,
+    reverse_complement_nucleotides: bool,
 }
 
 impl<R: Read> FastQFile<R> {
+    pub fn new(file_obj: BufReader<R>) -> Self {
+        FastQFile {
+            file_obj: file_obj,
+            reverse_complement_nucleotides: false,
+        }
+    }
+
     pub fn read_next(&mut self, buf: &mut FastQRead) -> Result<bool, FastQFileError> {
         let mut title = String::new();
         let mut nucleotides = String::new();
@@ -141,6 +149,9 @@ impl<R: Read> FastQFile<R> {
             title: title,
             sub_title: sub_title,
         };
+        if self.reverse_complement_nucleotides {
+            buf.reverse_complement_nucleotides();
+        }
         return Ok(true);
     }
 }
@@ -148,17 +159,13 @@ impl<R: Read> FastQFile<R> {
 impl FastQFile<File> {
     pub fn open<P: AsRef<Path>>(path: &P) -> Result<Self, std::io::Error> {
         let file = File::open(path)?;
-        Ok(FastQFile {
-            file_obj: BufReader::new(file),
-        })
+        Ok(FastQFile::new(BufReader::new(file)))
     }
 }
 
 impl FastQFile<std::io::Stdin> {
     pub fn from_stdin() -> Self {
-        FastQFile {
-            file_obj: BufReader::new(std::io::stdin()),
-        }
+        FastQFile::new(BufReader::new(std::io::stdin()))
     }
 }
 
@@ -198,9 +205,7 @@ mod tests {
 
     #[test]
     fn test_correct_read() -> Result<(), FastQFileError> {
-        let mut reader = FastQFile {
-            file_obj: BufReader::new(FASTQ_RECORD.as_bytes()),
-        };
+        let mut reader = FastQFile::new(BufReader::new(FASTQ_RECORD.as_bytes()));
         let mut seq = FastQRead::default();
 
         assert_eq!(true, reader.read_next(&mut seq)?);
@@ -244,6 +249,17 @@ mod tests {
 
         assert_eq!(false, reader.read_next(&mut seq)?);
 
+        let mut reader_rc = FastQFile::new(BufReader::new(FASTQ_RECORD.as_bytes()));
+        reader_rc.reverse_complement_nucleotides = true;
+        let mut seq_rc = FastQRead::default();
+
+        assert_eq!(true, reader_rc.read_next(&mut seq_rc)?);
+        seq_rc.reverse_complement_nucleotides();
+        assert_eq!(seq_rc.title, seq.title);
+        assert_eq!(seq_rc.sub_title, seq.sub_title);
+        assert_eq!(seq_rc.qualities, seq.qualities);
+        assert_eq!(seq_rc.letters, seq.letters);
+
         Ok(())
     }
 
@@ -256,9 +272,9 @@ mod tests {
 
     #[test]
     fn test_invalid_sequence_length() {
-        let mut reader = FastQFile {
-            file_obj: BufReader::new(FASTQ_RECORD_INVALID_SEQUENCE_LENGTH.as_bytes()),
-        };
+        let mut reader = FastQFile::new(BufReader::new(
+            FASTQ_RECORD_INVALID_SEQUENCE_LENGTH.as_bytes(),
+        ));
         let mut seq = FastQRead::default();
 
         let actual = reader.read_next(&mut seq);
@@ -278,9 +294,9 @@ mod tests {
 
     #[test]
     fn test_invalid_quality_length() {
-        let mut reader = FastQFile {
-            file_obj: BufReader::new(FASTQ_RECORD_INVALID_QUALITY_LENGTH.as_bytes()),
-        };
+        let mut reader = FastQFile::new(BufReader::new(
+            FASTQ_RECORD_INVALID_QUALITY_LENGTH.as_bytes(),
+        ));
         let mut seq = FastQRead::default();
 
         let actual = reader.read_next(&mut seq);
@@ -300,9 +316,7 @@ mod tests {
 
     #[test]
     fn test_no_description_line() {
-        let mut reader = FastQFile {
-            file_obj: BufReader::new(FASTQ_RECORD_NO_DESCRIPTION.as_bytes()),
-        };
+        let mut reader = FastQFile::new(BufReader::new(FASTQ_RECORD_NO_DESCRIPTION.as_bytes()));
         let mut seq = FastQRead::default();
 
         let actual = reader.read_next(&mut seq);
@@ -322,9 +336,7 @@ mod tests {
 
     #[test]
     fn test_no_title_line() {
-        let mut reader = FastQFile {
-            file_obj: BufReader::new(FASTQ_RECORD_NO_TITLE.as_bytes()),
-        };
+        let mut reader = FastQFile::new(BufReader::new(FASTQ_RECORD_NO_TITLE.as_bytes()));
         let mut seq = FastQRead::default();
 
         let actual = reader.read_next(&mut seq);
@@ -341,9 +353,7 @@ mod tests {
 
     #[test]
     fn test_invalid_nucleotide() {
-        let mut reader = FastQFile {
-            file_obj: BufReader::new(FASTQ_RECORD_INVALID_NUCLEOTIDE.as_bytes()),
-        };
+        let mut reader = FastQFile::new(BufReader::new(FASTQ_RECORD_INVALID_NUCLEOTIDE.as_bytes()));
         let mut seq = FastQRead::default();
 
         let actual = reader.read_next(&mut seq);
@@ -363,9 +373,7 @@ mod tests {
 
     #[test]
     fn test_invalid_quality() {
-        let mut reader = FastQFile {
-            file_obj: BufReader::new(FASTQ_RECORD_INVALID_QUALITY.as_bytes()),
-        };
+        let mut reader = FastQFile::new(BufReader::new(FASTQ_RECORD_INVALID_QUALITY.as_bytes()));
         let mut seq = FastQRead::default();
 
         let actual = reader.read_next(&mut seq);
@@ -392,9 +400,7 @@ mod tests {
 
     #[test]
     fn test_truncated() {
-        let mut reader = FastQFile {
-            file_obj: BufReader::new(FASTQ_RECORD_TRUNCATED_QUALITY.as_bytes()),
-        };
+        let mut reader = FastQFile::new(BufReader::new(FASTQ_RECORD_TRUNCATED_QUALITY.as_bytes()));
         let mut seq = FastQRead::default();
 
         let actual = reader.read_next(&mut seq);
@@ -404,9 +410,9 @@ mod tests {
             FastQFileError::IncompleteRecord
         ));
 
-        let mut reader = FastQFile {
-            file_obj: BufReader::new(FASTQ_RECORD_TRUNCATED_DESCRIPTION.as_bytes()),
-        };
+        let mut reader = FastQFile::new(BufReader::new(
+            FASTQ_RECORD_TRUNCATED_DESCRIPTION.as_bytes(),
+        ));
         let mut seq = FastQRead::default();
 
         let actual = reader.read_next(&mut seq);
@@ -416,9 +422,9 @@ mod tests {
             FastQFileError::IncompleteRecord
         ));
 
-        let mut reader = FastQFile {
-            file_obj: BufReader::new(FASTQ_RECORD_TRUNCATED_NUCLEOTIDES.as_bytes()),
-        };
+        let mut reader = FastQFile::new(BufReader::new(
+            FASTQ_RECORD_TRUNCATED_NUCLEOTIDES.as_bytes(),
+        ));
         let mut seq = FastQRead::default();
 
         let actual = reader.read_next(&mut seq);
@@ -440,9 +446,7 @@ mod tests {
 
     #[test]
     fn test_fasta_record() -> Result<(), FastQFileError> {
-        let mut reader = FastQFile {
-            file_obj: BufReader::new(FASTQ_RECORD_FASTA_RECORD.as_bytes()),
-        };
+        let mut reader = FastQFile::new(BufReader::new(FASTQ_RECORD_FASTA_RECORD.as_bytes()));
         let mut seq = FastQRead::default();
 
         assert_eq!(true, reader.read_next(&mut seq)?);
