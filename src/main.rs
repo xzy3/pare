@@ -46,7 +46,7 @@ fn compress(
     let mut sequence_reader: Box<dyn PairedFastQReader>;
     match files.len() {
         1 => {
-            println!("interleaved {:?} {:?} {}", files[0], output, reverse_r2);
+            //println!("interleaved {:?} {:?} {}", files[0], output, reverse_r2);
             let in_file: Box<dyn FastQFileReader> = match files[0].to_str() {
                 Some("-") => Box::new(FastQFile::from_stdin()),
                 _ => Box::new(FastQFile::open(&files[0])?),
@@ -55,7 +55,7 @@ fn compress(
             sequence_reader = Box::new(FastQInterleavedFile::new(in_file, reverse_r2));
         }
         2 => {
-            println!("paired files {:?} {:?} {}", files, output, reverse_r2);
+            //println!("paired files {:?} {:?} {}", files, output, reverse_r2);
             let in_file_r1: Box<dyn FastQFileReader> = match files[0].to_str() {
                 Some("-") => Box::new(FastQFile::from_stdin()),
                 _ => Box::new(FastQFile::open(&files[0])?),

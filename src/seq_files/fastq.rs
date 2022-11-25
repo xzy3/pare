@@ -29,11 +29,11 @@ impl FastQRead {
             .iter()
             .rev()
             .map(|n| match n {
-                0 => 0,
-                1 => 2,
-                2 => 1,
-                3 => 4,
-                4 => 3,
+                b'n' => b'n',
+                b'a' => b't',
+                b't' => b'a',
+                b'c' => b'g',
+                b'g' => b'c',
                 _ => panic!("Invalid nuceotide {} found!", n),
             })
             .collect();
@@ -71,11 +71,11 @@ fn nuc_string_to_vec(letters: &str) -> Result<Vec<u8>, FastQFileError> {
     let mut ret: Vec<u8> = Vec::with_capacity(letters.len());
     for n in letters.chars() {
         match n {
-            'n' | 'N' => ret.push(0),
-            'a' | 'A' => ret.push(1),
-            't' | 'T' => ret.push(2),
-            'c' | 'C' => ret.push(3),
-            'g' | 'G' => ret.push(4),
+            'n' | 'N' => ret.push(b'n'),
+            'a' | 'A' => ret.push(b'a'),
+            't' | 'T' => ret.push(b't'),
+            'c' | 'C' => ret.push(b'c'),
+            'g' | 'G' => ret.push(b'g'),
             _ => return Err(FastQFileError::InvalidNucleotideLetter { c: n }),
         }
     }
@@ -263,23 +263,12 @@ mod tests {
     #[test]
     fn test_reverse_complement_nucleotides() {
         let mut read = FastQRead::default();
-        read.letters = [
-            2, 2, 1, 1, 2, 2, 4, 4, 2, 1, 1, 1, 2, 1, 1, 1, 2, 3, 2, 3, 3, 2, 1, 1, 2, 1, 4, 3, 2,
-            2, 1, 4, 1, 2, 0, 2, 2, 1, 3, 3, 2, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 1, 4, 2, 2, 2,
-            3, 2, 2, 4, 1, 4, 1, 2, 2, 2, 4, 2, 2, 4, 4, 4, 4, 4, 1, 4, 1, 3, 1, 2, 2, 2, 2, 2, 4,
-            2, 4, 1, 2, 2, 4, 3, 3, 2, 2, 4, 1, 2,
-        ]
-        .to_vec();
-        read.reverse_complement_nucleotides();
+        read.letters = b"ttaattggtaaataaatctcctaatagcttagatnttaccttnnnnnnnnnntagtttcttgagatttgttgggggagacatttttgtgattgccttgat".to_vec();
 
+        read.reverse_complement_nucleotides();
         assert_eq!(
             read.letters,
-            [
-                1, 2, 3, 1, 1, 4, 4, 3, 1, 1, 2, 3, 1, 3, 1, 1, 1, 1, 1, 2, 4, 2, 3, 2, 3, 3, 3, 3,
-                3, 1, 1, 3, 1, 1, 1, 2, 3, 2, 3, 1, 1, 4, 1, 1, 1, 3, 2, 1, 0, 0, 0, 0, 0, 0, 0, 0,
-                0, 0, 1, 1, 4, 4, 2, 1, 1, 0, 1, 2, 3, 2, 1, 1, 4, 3, 2, 1, 2, 2, 1, 4, 4, 1, 4, 1,
-                2, 2, 2, 1, 2, 2, 2, 1, 3, 3, 1, 1, 2, 2, 1, 1
-            ]
+            b"atcaaggcaatcacaaaaatgtctcccccaacaaatctcaagaaactannnnnnnnnnaaggtaanatctaagctattaggagatttatttaccaattaa"
         );
     }
 
@@ -307,16 +296,7 @@ mod tests {
         );
         assert_eq!(
             seq.letters,
-            //T  T  A  A  T  T  G  G  T  A  A  A  T  A  A  A  T  C  T  C  C  T  A  A  T  A  G  C
-            [
-                2, 2, 1, 1, 2, 2, 4, 4, 2, 1, 1, 1, 2, 1, 1, 1, 2, 3, 2, 3, 3, 2, 1, 1, 2, 1, 4, 3,
-                //T  T  A  G  A  T  N  T  T  A  C  C  T  T  N  N  N  N  N  N  N  N  N  N  T  A  G  T
-                2, 2, 1, 4, 1, 2, 0, 2, 2, 1, 3, 3, 2, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 1, 4, 2,
-                //T  T  C  T  T  G  A  G  A  T  T  T  G  T  T  G  G  G  G  G  A  G  A  C  A  T  T  T
-                2, 2, 3, 2, 2, 4, 1, 4, 1, 2, 2, 2, 4, 2, 2, 4, 4, 4, 4, 4, 1, 4, 1, 3, 1, 2, 2, 2,
-                //T  T  G  T  G  A  T  T  G  C  C  T  T  G  A  T
-                2, 2, 4, 2, 4, 1, 2, 2, 4, 3, 3, 2, 2, 4, 1, 2
-            ]
+            b"ttaattggtaaataaatctcctaatagcttagatnttaccttnnnnnnnnnntagtttcttgagatttgttgggggagacatttttgtgattgccttgat"
         );
         assert_eq!(
             seq.qualities,
@@ -335,16 +315,6 @@ mod tests {
         );
 
         assert_eq!(false, reader.read_next(&mut seq)?);
-
-        //let mut reader_rc = FastQFile::new(BufReader::new(FASTQ_RECORD.as_bytes()));
-        //let mut seq_rc = FastQRead::default();
-
-        //assert_eq!(true, reader_rc.read_next(&mut seq_rc)?);
-        //seq_rc.reverse_complement_nucleotides();
-        //assert_eq!(seq_rc.title, seq.title);
-        //assert_eq!(seq_rc.sub_title, seq.sub_title);
-        //assert_eq!(seq_rc.qualities, seq.qualities);
-        //assert_eq!(seq_rc.letters, seq.letters);
 
         Ok(())
     }
