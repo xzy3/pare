@@ -550,4 +550,85 @@ mod tests {
 
         Ok(())
     }
+
+    // test the pair iterator items. The parsing is tested by the FastQFile tests so just make sure
+    // they get the right files.
+    const FASTQ_RECORD_INTERLEAVED: &str = concat!(
+        "@HWI-EAS209_0006_FC706VJ:5:58:5894:21141#ATCACG/1\n",
+        "TTAATTGGTAAATAAATCTCCTAATAGCTTAGATNTTACCTTNNNNNNNNNNTAGTTTCTTGAGATTTGTTGGGGGAGACATTTTTGTGATTGCCTTGAT\n",
+        "+\n",
+        "efcfffffcfeefffcffffffddf`feed]`]_B__^__[YBBBBBBBBBBRTT\\]][]dddd`ddd^dddadd^BBBBBBBBBBBBBBBBBBBBBBBB\n",
+        "@HWI-EAS209_0006_FC706VJ:5:58:5894:21141#ATCACG/2\n",
+        "TTAATTGGTAAATAAATCTCCTAATAGCTTAGATNTTACCTTNNNNNNNNNNTAGTTTCTTGAGATTTGTTGGGGGAGACATTTTTGTGATTGCCTTGAT\n",
+        "+\n",
+        "efcfffffcfeefffcffffffddf`feed]`]_B__^__[YBBBBBBBBBBRTT\\]][]dddd`ddd^dddadd^BBBBBBBBBBBBBBBBBBBBBBBB\n"
+    );
+
+    #[test]
+    fn test_fastq_interleaved_file() -> Result<(), FastQFileError> {
+        let str_reader = Box::new(FastQFile::new(BufReader::new(
+            FASTQ_RECORD_INTERLEAVED.as_bytes(),
+        )));
+        let mut seq1 = FastQRead::default();
+        let mut seq2 = FastQRead::default();
+
+        let mut reader = FastQInterleavedFile::new(str_reader, true);
+        reader.read_next(&mut seq1, &mut seq2)?;
+
+        assert_eq!(
+            seq1.title,
+            "HWI-EAS209_0006_FC706VJ:5:58:5894:21141#ATCACG/1"
+        );
+        assert_eq!(
+            seq2.title,
+            "HWI-EAS209_0006_FC706VJ:5:58:5894:21141#ATCACG/2"
+        );
+        seq2.reverse_complement_nucleotides();
+        assert_eq!(seq1.letters, seq2.letters);
+
+        Ok(())
+    }
+
+    const FASTQ_RECORD_PAIR_R1: &str = concat!(
+        "@HWI-EAS209_0006_FC706VJ:5:58:5894:21141#ATCACG/1\n",
+        "TTAATTGGTAAATAAATCTCCTAATAGCTTAGATNTTACCTTNNNNNNNNNNTAGTTTCTTGAGATTTGTTGGGGGAGACATTTTTGTGATTGCCTTGAT\n",
+        "+\n",
+        "efcfffffcfeefffcffffffddf`feed]`]_B__^__[YBBBBBBBBBBRTT\\]][]dddd`ddd^dddadd^BBBBBBBBBBBBBBBBBBBBBBBB\n"
+    );
+
+    const FASTQ_RECORD_PAIR_R2: &str = concat!(
+        "@HWI-EAS209_0006_FC706VJ:5:58:5894:21141#ATCACG/2\n",
+        "TTAATTGGTAAATAAATCTCCTAATAGCTTAGATNTTACCTTNNNNNNNNNNTAGTTTCTTGAGATTTGTTGGGGGAGACATTTTTGTGATTGCCTTGAT\n",
+        "+\n",
+        "efcfffffcfeefffcffffffddf`feed]`]_B__^__[YBBBBBBBBBBRTT\\]][]dddd`ddd^dddadd^BBBBBBBBBBBBBBBBBBBBBBBB\n"
+    );
+
+    #[test]
+    fn test_fastq_paired_files() -> Result<(), FastQFileError> {
+        let str_reader1 = Box::new(FastQFile::new(BufReader::new(
+            FASTQ_RECORD_PAIR_R1.as_bytes(),
+        )));
+        let str_reader2 = Box::new(FastQFile::new(BufReader::new(
+            FASTQ_RECORD_PAIR_R2.as_bytes(),
+        )));
+
+        let mut reader = FastQPairedFiles::new(str_reader1, str_reader2, true);
+        let mut seq1 = FastQRead::default();
+        let mut seq2 = FastQRead::default();
+
+        reader.read_next(&mut seq1, &mut seq2)?;
+
+        assert_eq!(
+            seq1.title,
+            "HWI-EAS209_0006_FC706VJ:5:58:5894:21141#ATCACG/1"
+        );
+        assert_eq!(
+            seq2.title,
+            "HWI-EAS209_0006_FC706VJ:5:58:5894:21141#ATCACG/2"
+        );
+        seq2.reverse_complement_nucleotides();
+        assert_eq!(seq1.letters, seq2.letters);
+
+        Ok(())
+    }
 }
