@@ -9,10 +9,10 @@ use std::vec::Vec;
 
 #[derive(Debug, Default)]
 pub struct FastQRead {
-    letters: Vec<u8>,
-    qualities: Vec<u8>,
-    title: String,
-    sub_title: String,
+    pub letters: Vec<u8>,
+    pub qualities: Vec<u8>,
+    pub title: String,
+    pub sub_title: String,
 }
 
 impl FastQRead {
@@ -63,6 +63,8 @@ pub enum FastQFileError {
     IncompleteRecord,
     #[error("Found FASTA style title (title started with a '>'). Expected FASTQ files.")]
     FastATitleLine,
+    #[error("Missing read from pair, file truncated")]
+    MissingPairedRead,
 }
 
 fn nuc_string_to_vec(letters: &str) -> Result<Vec<u8>, FastQFileError> {
@@ -82,21 +84,23 @@ fn nuc_string_to_vec(letters: &str) -> Result<Vec<u8>, FastQFileError> {
 }
 
 /// Fastq file things
+pub trait FastQFileReader {
+    fn read_next(&mut self, buf: &mut FastQRead) -> Result<bool, FastQFileError>;
+}
+
 #[derive(Debug)]
 pub struct FastQFile<R: Read> {
     file_obj: BufReader<R>,
-    reverse_complement_nucleotides: bool,
 }
 
 impl<R: Read> FastQFile<R> {
     pub fn new(file_obj: BufReader<R>) -> Self {
-        FastQFile {
-            file_obj: file_obj,
-            reverse_complement_nucleotides: false,
-        }
+        FastQFile { file_obj: file_obj }
     }
+}
 
-    pub fn read_next(&mut self, buf: &mut FastQRead) -> Result<bool, FastQFileError> {
+impl<R: Read> FastQFileReader for FastQFile<R> {
+    fn read_next(&mut self, buf: &mut FastQRead) -> Result<bool, FastQFileError> {
         let mut title = String::new();
         let mut nucleotides = String::new();
         let mut sub_title = String::new();
@@ -149,9 +153,6 @@ impl<R: Read> FastQFile<R> {
             title: title,
             sub_title: sub_title,
         };
-        if self.reverse_complement_nucleotides {
-            buf.reverse_complement_nucleotides();
-        }
         return Ok(true);
     }
 }
@@ -166,6 +167,92 @@ impl FastQFile<File> {
 impl FastQFile<std::io::Stdin> {
     pub fn from_stdin() -> Self {
         FastQFile::new(BufReader::new(std::io::stdin()))
+    }
+}
+
+pub trait PairedFastQReader {
+    fn read_next(
+        &mut self,
+        buf_r1: &mut FastQRead,
+        buf_r2: &mut FastQRead,
+    ) -> Result<bool, FastQFileError>;
+}
+
+pub struct FastQPairedFiles {
+    r1_reader: Box<dyn FastQFileReader>,
+    r2_reader: Box<dyn FastQFileReader>,
+    reverse_complement_r2_nucleotides: bool,
+}
+
+impl FastQPairedFiles {
+    pub fn new(
+        stream_r1: Box<dyn FastQFileReader>,
+        stream_r2: Box<dyn FastQFileReader>,
+        reverse_complement_r2_nucleotides: bool,
+    ) -> Self {
+        FastQPairedFiles {
+            r1_reader: stream_r1,
+            r2_reader: stream_r2,
+            reverse_complement_r2_nucleotides: reverse_complement_r2_nucleotides,
+        }
+    }
+}
+
+impl PairedFastQReader for FastQPairedFiles {
+    fn read_next(
+        &mut self,
+        buf_r1: &mut FastQRead,
+        buf_r2: &mut FastQRead,
+    ) -> Result<bool, FastQFileError> {
+        if !self.r1_reader.read_next(buf_r1)? {
+            return Ok(false);
+        }
+
+        if !self.r2_reader.read_next(buf_r2)? {
+            return Err(FastQFileError::MissingPairedRead);
+        }
+
+        if self.reverse_complement_r2_nucleotides {
+            buf_r2.reverse_complement_nucleotides();
+        }
+
+        Ok(true)
+    }
+}
+
+pub struct FastQInterleavedFile {
+    reader: Box<dyn FastQFileReader>,
+    reverse_complement_r2_nucleotides: bool,
+}
+
+impl FastQInterleavedFile {
+    pub fn new(stream: Box<dyn FastQFileReader>, reverse_complement_r2_nucleotides: bool) -> Self {
+        FastQInterleavedFile {
+            reader: stream,
+            reverse_complement_r2_nucleotides: reverse_complement_r2_nucleotides,
+        }
+    }
+}
+
+impl PairedFastQReader for FastQInterleavedFile {
+    fn read_next(
+        &mut self,
+        buf_r1: &mut FastQRead,
+        buf_r2: &mut FastQRead,
+    ) -> Result<bool, FastQFileError> {
+        if !self.reader.read_next(buf_r1)? {
+            return Ok(false);
+        }
+
+        if !self.reader.read_next(buf_r2)? {
+            return Err(FastQFileError::MissingPairedRead);
+        }
+
+        if self.reverse_complement_r2_nucleotides {
+            buf_r2.reverse_complement_nucleotides();
+        }
+
+        Ok(true)
     }
 }
 
@@ -249,16 +336,15 @@ mod tests {
 
         assert_eq!(false, reader.read_next(&mut seq)?);
 
-        let mut reader_rc = FastQFile::new(BufReader::new(FASTQ_RECORD.as_bytes()));
-        reader_rc.reverse_complement_nucleotides = true;
-        let mut seq_rc = FastQRead::default();
+        //let mut reader_rc = FastQFile::new(BufReader::new(FASTQ_RECORD.as_bytes()));
+        //let mut seq_rc = FastQRead::default();
 
-        assert_eq!(true, reader_rc.read_next(&mut seq_rc)?);
-        seq_rc.reverse_complement_nucleotides();
-        assert_eq!(seq_rc.title, seq.title);
-        assert_eq!(seq_rc.sub_title, seq.sub_title);
-        assert_eq!(seq_rc.qualities, seq.qualities);
-        assert_eq!(seq_rc.letters, seq.letters);
+        //assert_eq!(true, reader_rc.read_next(&mut seq_rc)?);
+        //seq_rc.reverse_complement_nucleotides();
+        //assert_eq!(seq_rc.title, seq.title);
+        //assert_eq!(seq_rc.sub_title, seq.sub_title);
+        //assert_eq!(seq_rc.qualities, seq.qualities);
+        //assert_eq!(seq_rc.letters, seq.letters);
 
         Ok(())
     }
