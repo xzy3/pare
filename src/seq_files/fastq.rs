@@ -50,7 +50,7 @@ pub enum FastQFileError {
         source: std::io::Error,
     },
     #[error("Did not find title (titles should start with '@')")]
-    NoTitleLine,
+    NoTitleLine { line: u32 },
     #[error("Did not find expected line starting with '+'")]
     NoDescriptionLine,
     #[error("The quality sequence has unexpected characters")]
@@ -91,11 +91,15 @@ pub trait FastQFileReader {
 #[derive(Debug)]
 pub struct FastQFile<R: Read> {
     file_obj: BufReader<R>,
+    line: u32,
 }
 
 impl<R: Read> FastQFile<R> {
     pub fn new(file_obj: BufReader<R>) -> Self {
-        FastQFile { file_obj: file_obj }
+        FastQFile {
+            file_obj: file_obj,
+            line: 0,
+        }
     }
 }
 
@@ -106,15 +110,22 @@ impl<R: Read> FastQFileReader for FastQFile<R> {
         let mut sub_title = String::new();
         let mut quality_letters = String::new();
 
-        if self.file_obj.read_line(&mut title)? == 0 {
-            return Ok(false);
+        loop {
+            if self.file_obj.read_line(&mut title)? == 0 {
+                return Ok(false);
+            }
+
+            // ignore blank lines
+            if !title.trim_end().is_empty() {
+                break;
+            }
         }
 
         if !title.starts_with("@") {
             if title.starts_with(">") {
                 return Err(FastQFileError::FastATitleLine);
             }
-            return Err(FastQFileError::NoTitleLine);
+            return Err(FastQFileError::NoTitleLine { line: self.line });
         }
         title = title[1..].trim_end().to_string();
 
@@ -153,6 +164,7 @@ impl<R: Read> FastQFileReader for FastQFile<R> {
             title: title,
             sub_title: sub_title,
         };
+        self.line += 4;
         return Ok(true);
     }
 }

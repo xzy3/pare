@@ -63,7 +63,7 @@ fn compress(
 
             let in_file_r2: Box<dyn FastQFileReader> = match files[1].to_str() {
                 Some("-") => Box::new(FastQFile::from_stdin()),
-                _ => Box::new(FastQFile::open(&files[0])?),
+                _ => Box::new(FastQFile::open(&files[1])?),
             };
 
             sequence_reader = Box::new(FastQPairedFiles::new(in_file_r1, in_file_r2, reverse_r2));
