@@ -409,7 +409,10 @@ mod tests {
 
         let actual = reader.read_next(&mut seq);
         assert!(actual.is_err());
-        assert!(matches!(actual.unwrap_err(), FastQFileError::NoTitleLine));
+        assert!(matches!(
+            actual.unwrap_err(),
+            FastQFileError::NoTitleLine { line: 0 }
+        ));
     }
 
     const FASTQ_RECORD_INVALID_NUCLEOTIDE: &str = concat!(

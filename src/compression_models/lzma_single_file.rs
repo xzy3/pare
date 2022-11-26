@@ -41,8 +41,10 @@ impl<W: Write> XZSingleFileWriter<W> {
     }
 
     pub fn write_u8(&mut self, record: &[u8]) -> io::Result<()> {
-        self.encoder.write(&record.len().to_be_bytes())?;
+        //let len = record.len() as u16;
+        //self.encoder.write(&len.to_be_bytes())?;
         self.encoder.write(record)?;
+        self.encoder.write(b"\x1E")?;
 
         Ok(())
     }
