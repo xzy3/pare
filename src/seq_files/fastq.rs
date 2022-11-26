@@ -190,19 +190,19 @@ pub trait PairedFastQReader {
     ) -> Result<bool, FastQFileError>;
 }
 
-pub struct FastQPairedFiles {
+pub struct FastQPairedFilesReader {
     r1_reader: Box<dyn FastQFileReader>,
     r2_reader: Box<dyn FastQFileReader>,
     reverse_complement_r2_nucleotides: bool,
 }
 
-impl FastQPairedFiles {
+impl FastQPairedFilesReader {
     pub fn new(
         stream_r1: Box<dyn FastQFileReader>,
         stream_r2: Box<dyn FastQFileReader>,
         reverse_complement_r2_nucleotides: bool,
     ) -> Self {
-        FastQPairedFiles {
+        FastQPairedFilesReader {
             r1_reader: stream_r1,
             r2_reader: stream_r2,
             reverse_complement_r2_nucleotides: reverse_complement_r2_nucleotides,
@@ -210,7 +210,7 @@ impl FastQPairedFiles {
     }
 }
 
-impl PairedFastQReader for FastQPairedFiles {
+impl PairedFastQReader for FastQPairedFilesReader {
     fn read_next(
         &mut self,
         buf_r1: &mut FastQRead,
@@ -232,21 +232,21 @@ impl PairedFastQReader for FastQPairedFiles {
     }
 }
 
-pub struct FastQInterleavedFile {
+pub struct FastQInterleavedFileReader {
     reader: Box<dyn FastQFileReader>,
     reverse_complement_r2_nucleotides: bool,
 }
 
-impl FastQInterleavedFile {
+impl FastQInterleavedFileReader {
     pub fn new(stream: Box<dyn FastQFileReader>, reverse_complement_r2_nucleotides: bool) -> Self {
-        FastQInterleavedFile {
+        FastQInterleavedFileReader {
             reader: stream,
             reverse_complement_r2_nucleotides: reverse_complement_r2_nucleotides,
         }
     }
 }
 
-impl PairedFastQReader for FastQInterleavedFile {
+impl PairedFastQReader for FastQInterleavedFileReader {
     fn read_next(
         &mut self,
         buf_r1: &mut FastQRead,
@@ -557,7 +557,7 @@ mod tests {
         let mut seq1 = FastQRead::default();
         let mut seq2 = FastQRead::default();
 
-        let mut reader = FastQInterleavedFile::new(str_reader, true);
+        let mut reader = FastQInterleavedFileReader::new(str_reader, true);
         reader.read_next(&mut seq1, &mut seq2)?;
 
         assert_eq!(
@@ -597,7 +597,7 @@ mod tests {
             FASTQ_RECORD_PAIR_R2.as_bytes(),
         )));
 
-        let mut reader = FastQPairedFiles::new(str_reader1, str_reader2, true);
+        let mut reader = FastQPairedFilesReader::new(str_reader1, str_reader2, true);
         let mut seq1 = FastQRead::default();
         let mut seq2 = FastQRead::default();
 

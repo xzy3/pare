@@ -52,7 +52,7 @@ fn compress(
                 _ => Box::new(FastQFile::open(&files[0])?),
             };
 
-            sequence_reader = Box::new(FastQInterleavedFile::new(in_file, reverse_r2));
+            sequence_reader = Box::new(FastQInterleavedFileReader::new(in_file, reverse_r2));
         }
         2 => {
             eprintln!("paired files {:?} {:?} {}", files, output, reverse_r2);
@@ -66,7 +66,11 @@ fn compress(
                 _ => Box::new(FastQFile::open(&files[1])?),
             };
 
-            sequence_reader = Box::new(FastQPairedFiles::new(in_file_r1, in_file_r2, !reverse_r2));
+            sequence_reader = Box::new(FastQPairedFilesReader::new(
+                in_file_r1,
+                in_file_r2,
+                !reverse_r2,
+            ));
         }
         _ => panic!("Too many input files! programming error."),
     }
