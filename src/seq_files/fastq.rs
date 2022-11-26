@@ -21,6 +21,19 @@ fn reverse_complement_nucleotides(nucleotides: &mut Vec<u8>) {
     });
 }
 
+fn nuclotides_upper(nucleotides: &mut Vec<u8>) {
+    nucleotides.iter_mut().for_each(|n| {
+        *n = match n {
+            b'n' => b'N',
+            b'a' => b'A',
+            b't' => b'T',
+            b'c' => b'C',
+            b'g' => b'G',
+            _ => panic!("Invalid nuclotide {} found!", n),
+        }
+    });
+}
+
 #[derive(Debug, Default)]
 pub struct FastQRead {
     pub letters: Vec<u8>,
@@ -90,14 +103,14 @@ pub trait FastQFileReaderTrait {
 
 #[derive(Debug)]
 pub struct FastQFileReader<R: Read> {
-    file_obj: BufReader<R>,
+    stream: BufReader<R>,
     line: u32,
 }
 
 impl<R: Read> FastQFileReader<R> {
-    pub fn new(file_obj: BufReader<R>) -> Self {
+    pub fn new(stream: BufReader<R>) -> Self {
         FastQFileReader {
-            file_obj: file_obj,
+            stream: stream,
             line: 0,
         }
     }
@@ -111,7 +124,7 @@ impl<R: Read> FastQFileReaderTrait for FastQFileReader<R> {
         let mut quality_letters = String::new();
 
         loop {
-            if self.file_obj.read_line(&mut title)? == 0 {
+            if self.stream.read_line(&mut title)? == 0 {
                 return Ok(false);
             }
 
@@ -129,13 +142,13 @@ impl<R: Read> FastQFileReaderTrait for FastQFileReader<R> {
         }
         title = title[1..].trim_end().to_string();
 
-        if self.file_obj.read_line(&mut nucleotides)? == 0 {
+        if self.stream.read_line(&mut nucleotides)? == 0 {
             return Err(FastQFileError::IncompleteRecord);
         }
 
         nucleotides = nucleotides.trim_end().to_string();
         let letters: Vec<u8> = nuc_string_to_vec(&nucleotides)?;
-        if self.file_obj.read_line(&mut sub_title)? == 0 {
+        if self.stream.read_line(&mut sub_title)? == 0 {
             return Err(FastQFileError::IncompleteRecord);
         }
 
@@ -144,7 +157,7 @@ impl<R: Read> FastQFileReaderTrait for FastQFileReader<R> {
         }
         sub_title = sub_title[1..].trim_end().to_string();
 
-        if self.file_obj.read_line(&mut quality_letters)? == 0 {
+        if self.stream.read_line(&mut quality_letters)? == 0 {
             return Err(FastQFileError::IncompleteRecord);
         }
 
@@ -281,14 +294,14 @@ pub trait FastQFileWriterTrait {
 }
 
 pub struct FastQFileWriter<W: Write> {
-    file_obj: BufWriter<W>,
+    stream: BufWriter<W>,
     line: u32,
 }
 
 impl<W: Write> FastQFileWriter<W> {
-    pub fn new(file_obj: BufWriter<W>) -> Self {
+    pub fn new(stream: BufWriter<W>) -> Self {
         FastQFileWriter {
-            file_obj: file_obj,
+            stream: stream,
             line: 0,
         }
     }
@@ -300,22 +313,23 @@ impl<W: Write> FastQFileWriterTrait for FastQFileWriter<W> {
         buf: FastQRead,
         reverse_complement: bool,
     ) -> Result<bool, FastQFileError> {
-        write!(self.file_obj, "@{}\n", buf.title)?;
-        if reverse_complement {
-            self.file_obj.write(&buf.letters)?;
-        } else {
-            let mut letters = buf.letters.to_owned();
-            reverse_complement_nucleotides(&mut letters);
-            self.file_obj.write(&letters)?;
-        }
+        write!(self.stream, "@{}\n", buf.title)?;
 
-        self.file_obj.write(b"\n")?;
-        write!(self.file_obj, "+{}\n", buf.sub_title)?;
+        let mut letters = buf.letters.to_owned();
+
+        if reverse_complement {
+            reverse_complement_nucleotides(&mut letters);
+        }
+        nuclotides_upper(&mut letters);
+        self.stream.write(&letters)?;
+
+        self.stream.write(b"\n")?;
+        write!(self.stream, "+{}\n", buf.sub_title)?;
 
         let quals: Vec<u8> = buf.qualities.iter().map(|q| q + 32).collect();
 
-        self.file_obj.write(&quals)?;
-        self.file_obj.write(b"\n")?;
+        self.stream.write(&quals)?;
+        self.stream.write(b"\n")?;
         self.line += 4;
         return Ok(true);
     }
@@ -680,7 +694,7 @@ mod tests {
     );
 
     #[test]
-    fn test_fastq_interleaved_file() -> Result<(), FastQFileError> {
+    fn test_fastq_interleaved_file_read() -> Result<(), FastQFileError> {
         let str_reader = Box::new(FastQFileReader::new(BufReader::new(
             FASTQ_RECORD_INTERLEAVED.as_bytes(),
         )));
@@ -719,7 +733,7 @@ mod tests {
     );
 
     #[test]
-    fn test_fastq_paired_files() -> Result<(), FastQFileError> {
+    fn test_fastq_paired_files_read() -> Result<(), FastQFileError> {
         let str_reader1 = Box::new(FastQFileReader::new(BufReader::new(
             FASTQ_RECORD_PAIR_R1.as_bytes(),
         )));
@@ -743,6 +757,76 @@ mod tests {
         );
         seq2.reverse_complement_nucleotides();
         assert_eq!(seq1.letters, seq2.letters);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_correct_write() -> Result<(), FastQFileError> {
+        let mut reader = FastQFileReader::new(BufReader::new(FASTQ_RECORD.as_bytes()));
+        let mut seq = FastQRead::default();
+
+        assert_eq!(true, reader.read_next(&mut seq)?);
+        let buf: Vec<u8> = Vec::with_capacity(FASTQ_RECORD.len());
+
+        let mut writer = FastQFileWriter::new(BufWriter::new(buf));
+        writer.write_next(seq, false)?;
+
+        let result = writer.stream.into_inner().unwrap();
+        assert_eq!(FASTQ_RECORD.as_bytes(), result);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_fastq_paired_files_write() -> Result<(), FastQFileError> {
+        let str_reader1 = Box::new(FastQFileReader::new(BufReader::new(
+            FASTQ_RECORD_PAIR_R1.as_bytes(),
+        )));
+        let str_reader2 = Box::new(FastQFileReader::new(BufReader::new(
+            FASTQ_RECORD_PAIR_R2.as_bytes(),
+        )));
+
+        let mut reader = FastQPairedFilesReader::new(str_reader1, str_reader2, true);
+        let mut seq1 = FastQRead::default();
+        let mut seq2 = FastQRead::default();
+
+        reader.read_next(&mut seq1, &mut seq2)?;
+
+        let buf1: Vec<u8> = Vec::with_capacity(FASTQ_RECORD_PAIR_R1.len());
+        let buf2: Vec<u8> = Vec::with_capacity(FASTQ_RECORD_PAIR_R2.len());
+
+        let mut writer = FastQPairedFilesWriter::new(
+            Box::new(FastQFileWriter::new(BufWriter::new(buf1))),
+            Box::new(FastQFileWriter::new(BufWriter::new(buf2))),
+            true,
+        );
+
+        writer.write_next(seq1, seq2)?;
+        // really need to find a way to get to the underlying data. the type checker/lifetime
+        // checker isn't happy with normal methods.
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_fastq_interleaved_file_write() -> Result<(), FastQFileError> {
+        let str_reader = Box::new(FastQFileReader::new(BufReader::new(
+            FASTQ_RECORD_INTERLEAVED.as_bytes(),
+        )));
+        let mut seq1 = FastQRead::default();
+        let mut seq2 = FastQRead::default();
+
+        let mut reader = FastQInterleavedFileReader::new(str_reader, true);
+        reader.read_next(&mut seq1, &mut seq2)?;
+
+        let buf: Vec<u8> = Vec::with_capacity(FASTQ_RECORD_INTERLEAVED.len());
+        let mut writer = FastQInterleavedFileWriter::new(
+            Box::new(FastQFileWriter::new(BufWriter::new(buf))),
+            true,
+        );
+
+        writer.write_next(seq1, seq2)?;
 
         Ok(())
     }

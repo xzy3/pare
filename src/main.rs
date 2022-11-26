@@ -100,10 +100,10 @@ fn decompress(
 ) -> Result<(), XZSingleFileError> {
     match outputs.len() {
         1 => {
-            eprintln!("interleaved {:?} {:?}", file, outputs);
+            eprintln!("interleaved {:?} {:?} {:?}", file, outputs, reverse_r2);
         }
         2 => {
-            eprintln!("paired files {:?} {:?}", file, outputs[0]);
+            eprintln!("paired files {:?} {:?} {:?}", file, outputs[0], reverse_r2);
         }
         _ => panic!("Too many output files! programming error."),
     }
