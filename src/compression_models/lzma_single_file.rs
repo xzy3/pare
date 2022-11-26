@@ -44,7 +44,7 @@ impl<W: Write> XZSingleFileWriter<W> {
         //let len = record.len() as u16;
         //self.encoder.write(&len.to_be_bytes())?;
         self.encoder.write(record)?;
-        self.encoder.write(b"\x1E")?;
+        self.encoder.write(b"\xFF")?;
 
         Ok(())
     }
