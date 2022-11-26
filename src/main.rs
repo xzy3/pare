@@ -33,6 +33,8 @@ enum Commands {
         #[arg(short, long, default_value = "-", num_args(1..3))]
         outputs: Vec<OsString>,
         file: OsString,
+        #[arg(short, long, action, help = "Don't reverse complement R2")]
+        reverse_r2: bool,
     },
     #[command()]
     Cite {},
@@ -47,23 +49,23 @@ fn compress(
     match files.len() {
         1 => {
             //println!("interleaved {:?} {:?} {}", files[0], output, reverse_r2);
-            let in_file: Box<dyn FastQFileReader> = match files[0].to_str() {
-                Some("-") => Box::new(FastQFile::from_stdin()),
-                _ => Box::new(FastQFile::open(&files[0])?),
+            let in_file: Box<dyn FastQFileReaderTrait> = match files[0].to_str() {
+                Some("-") => Box::new(FastQFileReader::from_stdin()),
+                _ => Box::new(FastQFileReader::open(&files[0])?),
             };
 
             sequence_reader = Box::new(FastQInterleavedFileReader::new(in_file, reverse_r2));
         }
         2 => {
-            eprintln!("paired files {:?} {:?} {}", files, output, reverse_r2);
-            let in_file_r1: Box<dyn FastQFileReader> = match files[0].to_str() {
-                Some("-") => Box::new(FastQFile::from_stdin()),
-                _ => Box::new(FastQFile::open(&files[0])?),
+            //eprintln!("paired files {:?} {:?} {}", files, output, reverse_r2);
+            let in_file_r1: Box<dyn FastQFileReaderTrait> = match files[0].to_str() {
+                Some("-") => Box::new(FastQFileReader::from_stdin()),
+                _ => Box::new(FastQFileReader::open(&files[0])?),
             };
 
-            let in_file_r2: Box<dyn FastQFileReader> = match files[1].to_str() {
-                Some("-") => Box::new(FastQFile::from_stdin()),
-                _ => Box::new(FastQFile::open(&files[1])?),
+            let in_file_r2: Box<dyn FastQFileReaderTrait> = match files[1].to_str() {
+                Some("-") => Box::new(FastQFileReader::from_stdin()),
+                _ => Box::new(FastQFileReader::open(&files[1])?),
             };
 
             sequence_reader = Box::new(FastQPairedFilesReader::new(
@@ -91,6 +93,23 @@ fn compress(
     Ok(())
 }
 
+fn decompress(
+    file: OsString,
+    outputs: Vec<OsString>,
+    reverse_r2: bool,
+) -> Result<(), XZSingleFileError> {
+    match outputs.len() {
+        1 => {
+            eprintln!("interleaved {:?} {:?}", file, outputs);
+        }
+        2 => {
+            eprintln!("paired files {:?} {:?}", file, outputs[0]);
+        }
+        _ => panic!("Too many output files! programming error."),
+    }
+    Ok(())
+}
+
 fn main() -> Result<(), XZSingleFileError> {
     let args = Cli::parse();
 
@@ -100,15 +119,11 @@ fn main() -> Result<(), XZSingleFileError> {
             output,
             reverse_r2,
         } => compress(&files, output, reverse_r2)?,
-        Commands::Decompress { file, outputs } => match outputs.len() {
-            1 => {
-                println!("interleaved {:?} {:?}", file, outputs);
-            }
-            2 => {
-                println!("paired files {:?} {:?}", file, outputs[0]);
-            }
-            _ => panic!("Too many output files! programming error."),
-        },
+        Commands::Decompress {
+            file,
+            outputs,
+            reverse_r2,
+        } => decompress(file, outputs, reverse_r2)?,
         Commands::Cite {} => {
             println!("print out a citation here");
         }
