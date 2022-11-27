@@ -1,42 +1,15 @@
-use thiserror::Error;
-
 use std::fs::File;
 use std::io;
 use std::io::{BufRead, BufReader, BufWriter, Read, Write};
 use std::path::Path;
-use std::string::FromUtf8Error;
 
 use xz2::read::XzDecoder;
 use xz2::write::XzEncoder;
 
-use crate::seq_files::fastq::{FastQFileError, FastQRead, PairedFastQReader, PairedFastQWriter};
+use crate::compression_models::*;
+use crate::seq_files::fastq::{FastQRead, PairedFastQReader, PairedFastQWriter};
 
 const FILE_VERSION: &'static [u8] = &*b"PARE lzma_single_file v1\xFF";
-
-#[derive(Error, Debug)]
-pub enum XZSingleFileError {
-    #[error("IO error while reading fastq file")]
-    IO {
-        #[from]
-        source: std::io::Error,
-    },
-    #[error("bad value found file likely corrupted")]
-    EncodingError {
-        #[from]
-        source: FromUtf8Error,
-    },
-
-    #[error("Invalid fastq file")]
-    FastQError {
-        #[from]
-        source: FastQFileError,
-    },
-
-    #[error("EOF caused Incomplete record")]
-    IncompleteRecord,
-    #[error("Could not find the expected version string")]
-    MissingVersion,
-}
 
 pub struct XZSingleFileWriter<W: Write> {
     encoder: BufWriter<XzEncoder<W>>,
@@ -62,11 +35,13 @@ impl<W: Write> XZSingleFileWriter<W> {
 
         Ok(())
     }
+}
 
-    pub fn compress(
+impl<W: Write> EncoderModel for XZSingleFileWriter<W> {
+    fn compress(
         &mut self,
         reader: &mut Box<dyn PairedFastQReader>,
-    ) -> Result<(), XZSingleFileError> {
+    ) -> Result<(), CompressionModelError> {
         let mut r1 = FastQRead::default();
         let mut r2 = FastQRead::default();
 
@@ -113,20 +88,20 @@ impl<R: Read> XZSingleFileReader<R> {
         }
     }
 
-    fn check_magic(&mut self) -> Result<(), XZSingleFileError> {
+    fn check_magic(&mut self) -> Result<(), CompressionModelError> {
         let mut buffer = vec![];
         if self.decoder.read_until(b'\xFF', &mut buffer)? == 0 {
-            return Err(XZSingleFileError::MissingVersion);
+            return Err(CompressionModelError::MissingVersion);
         }
 
         if buffer != FILE_VERSION {
-            return Err(XZSingleFileError::MissingVersion);
+            return Err(CompressionModelError::MissingVersion);
         }
 
         Ok(())
     }
 
-    fn read_string(&mut self, record: &mut String) -> Result<bool, XZSingleFileError> {
+    fn read_string(&mut self, record: &mut String) -> Result<bool, CompressionModelError> {
         let mut buffer = vec![];
 
         let ret = self.read_u8(&mut buffer)?;
@@ -135,7 +110,7 @@ impl<R: Read> XZSingleFileReader<R> {
         Ok(ret)
     }
 
-    fn read_u8(&mut self, record: &mut Vec<u8>) -> Result<bool, XZSingleFileError> {
+    fn read_u8(&mut self, record: &mut Vec<u8>) -> Result<bool, CompressionModelError> {
         record.clear();
         if self.decoder.read_until(b'\xFF', record)? == 0 {
             return Ok(false);
@@ -144,7 +119,7 @@ impl<R: Read> XZSingleFileReader<R> {
         match record.pop() {
             Some(b'\xFF') => {}
             _ => {
-                return Err(XZSingleFileError::IncompleteRecord);
+                return Err(CompressionModelError::IncompleteRecord);
             }
         }
 
@@ -155,21 +130,21 @@ impl<R: Read> XZSingleFileReader<R> {
         &mut self,
         r1: &mut FastQRead,
         r2: &mut FastQRead,
-    ) -> Result<bool, XZSingleFileError> {
+    ) -> Result<bool, CompressionModelError> {
         if !self.read_string(&mut r1.title)? {
             return Ok(false);
         }
 
         if !self.read_string(&mut r2.title)? {
-            return Err(XZSingleFileError::IncompleteRecord);
+            return Err(CompressionModelError::IncompleteRecord);
         }
 
         if !self.read_u8(&mut r1.letters)? {
-            return Err(XZSingleFileError::IncompleteRecord);
+            return Err(CompressionModelError::IncompleteRecord);
         }
 
         if !self.read_u8(&mut r2.letters)? {
-            return Err(XZSingleFileError::IncompleteRecord);
+            return Err(CompressionModelError::IncompleteRecord);
         }
 
         r1.qualities.clear();
@@ -178,7 +153,7 @@ impl<R: Read> XZSingleFileReader<R> {
         match self.decoder.read_exact(&mut r1.qualities[..]) {
             Ok(()) => {}
             _ => {
-                return Err(XZSingleFileError::IncompleteRecord);
+                return Err(CompressionModelError::IncompleteRecord);
             }
         }
 
@@ -187,17 +162,19 @@ impl<R: Read> XZSingleFileReader<R> {
         match self.decoder.read_exact(&mut r2.qualities[..]) {
             Ok(()) => {}
             _ => {
-                return Err(XZSingleFileError::IncompleteRecord);
+                return Err(CompressionModelError::IncompleteRecord);
             }
         }
 
         Ok(true)
     }
+}
 
-    pub fn decompress(
+impl<R: Read> DecoderModel for XZSingleFileReader<R> {
+    fn decompress(
         &mut self,
         writer: &mut Box<dyn PairedFastQWriter>,
-    ) -> Result<(), XZSingleFileError> {
+    ) -> Result<(), CompressionModelError> {
         let mut r1 = FastQRead::default();
         let mut r2 = FastQRead::default();
 

@@ -3,9 +3,12 @@ mod seq_files;
 
 use std::ffi::OsString;
 
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 
+use crate::compression_models::lzma_multi_stream::*;
 use crate::compression_models::lzma_single_file::*;
+use crate::compression_models::*;
+
 use crate::seq_files::fastq::*;
 
 #[derive(Debug, Parser)]
@@ -14,6 +17,12 @@ use crate::seq_files::fastq::*;
 struct Cli {
     #[command(subcommand)]
     command: Commands,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum)]
+enum Model {
+    LZMA,
+    LZMAMulti,
 }
 
 #[derive(Debug, Subcommand)]
@@ -27,6 +36,8 @@ enum Commands {
         files: Vec<OsString>,
         #[arg(short, long, action, help = "Don't reverse complement R2")]
         reverse_r2: bool,
+        #[arg(short, long, value_enum, help = "which model to use")]
+        model: Option<Model>,
     },
     #[command(arg_required_else_help = true)]
     Decompress {
@@ -34,7 +45,13 @@ enum Commands {
         file: OsString,
         #[arg(default_value = "-", num_args(1..3))]
         outputs: Vec<OsString>,
-        #[arg(short, long, action, help = "Don't reverse complement R2")]
+        #[arg(
+            short,
+            long,
+            action,
+            default_value = "lzma",
+            help = "Don't reverse complement R2"
+        )]
         reverse_r2: bool,
     },
     #[command()]
@@ -45,7 +62,8 @@ fn compress(
     files: &Vec<OsString>,
     output: Option<OsString>,
     reverse_r2: bool,
-) -> Result<(), XZSingleFileError> {
+    model: Option<Model>,
+) -> Result<(), CompressionModelError> {
     let mut sequence_reader: Box<dyn PairedFastQReader>;
     match files.len() {
         1 => {
@@ -76,19 +94,27 @@ fn compress(
         _ => panic!("Too many input files! programming error."),
     }
 
-    match output.as_ref().and_then(|o| o.to_str()) {
-        Some("-") | None => {
-            let mut writer = XZSingleFileWriter::to_stdout();
-            writer.compress(&mut sequence_reader)?;
+    let mut writer: Box<dyn EncoderModel>;
+    match (output.as_ref().and_then(|o| o.to_str()), model) {
+        (Some("-") | None, Some(Model::LZMA) | None) => {
+            writer = Box::new(XZSingleFileWriter::to_stdout());
         }
-        _ => {
-            let mut writer = XZSingleFileWriter::create(
+        (_, Some(Model::LZMA) | None) => {
+            writer = Box::new(XZSingleFileWriter::create(
                 &output.expect("Programming error! output should be Some"),
-            )?;
-            writer.compress(&mut sequence_reader)?;
+            )?);
+        }
+        (Some("-") | None, Some(Model::LZMAMulti)) => {
+            writer = Box::new(XZMultiStreamWriter::to_stdout());
+        }
+        (_, Some(Model::LZMAMulti)) => {
+            writer = Box::new(XZMultiStreamWriter::create(
+                &output.expect("Programming error! output should be Some"),
+            )?);
         }
     }
 
+    writer.compress(&mut sequence_reader)?;
     Ok(())
 }
 
@@ -96,7 +122,7 @@ fn decompress(
     file: OsString,
     outputs: Vec<OsString>,
     reverse_r2: bool,
-) -> Result<(), XZSingleFileError> {
+) -> Result<(), CompressionModelError> {
     let mut sequence_writer: Box<dyn PairedFastQWriter>;
     match outputs.len() {
         1 => {
@@ -142,7 +168,7 @@ fn decompress(
     Ok(())
 }
 
-fn main() -> Result<(), XZSingleFileError> {
+fn main() -> Result<(), CompressionModelError> {
     let args = Cli::parse();
 
     match args.command {
@@ -150,7 +176,8 @@ fn main() -> Result<(), XZSingleFileError> {
             files,
             output,
             reverse_r2,
-        } => compress(&files, output, reverse_r2)?,
+            model,
+        } => compress(&files, output, reverse_r2, model)?,
         Commands::Decompress {
             file,
             outputs,
