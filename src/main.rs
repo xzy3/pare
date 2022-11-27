@@ -30,9 +30,10 @@ enum Commands {
     },
     #[command(arg_required_else_help = true)]
     Decompress {
-        #[arg(short, long, default_value = "-", num_args(1..3))]
-        outputs: Vec<OsString>,
+        #[arg(default_value = "-")]
         file: OsString,
+        #[arg(default_value = "-", num_args(1..3))]
+        outputs: Vec<OsString>,
         #[arg(short, long, action, help = "Don't reverse complement R2")]
         reverse_r2: bool,
     },
@@ -69,9 +70,7 @@ fn compress(
             };
 
             sequence_reader = Box::new(FastQPairedFilesReader::new(
-                in_file_r1,
-                in_file_r2,
-                !reverse_r2,
+                in_file_r1, in_file_r2, reverse_r2,
             ));
         }
         _ => panic!("Too many input files! programming error."),
@@ -98,14 +97,47 @@ fn decompress(
     outputs: Vec<OsString>,
     reverse_r2: bool,
 ) -> Result<(), XZSingleFileError> {
+    let mut sequence_writer: Box<dyn PairedFastQWriter>;
     match outputs.len() {
         1 => {
             eprintln!("interleaved {:?} {:?} {:?}", file, outputs, reverse_r2);
+            let out_file: Box<dyn FastQFileWriterTrait> = match outputs[0].to_str() {
+                Some("-") => Box::new(FastQFileWriter::to_stdout()),
+                _ => Box::new(FastQFileWriter::create(&outputs[0])?),
+            };
+
+            sequence_writer = Box::new(FastQInterleavedFileWriter::new(out_file, reverse_r2));
         }
         2 => {
-            eprintln!("paired files {:?} {:?} {:?}", file, outputs[0], reverse_r2);
+            eprintln!("paired files {:?} {:?} {:?}", file, outputs, reverse_r2);
+            let out_file_r1: Box<dyn FastQFileWriterTrait> = match outputs[0].to_str() {
+                Some("-") => Box::new(FastQFileWriter::to_stdout()),
+                _ => Box::new(FastQFileWriter::create(&outputs[0])?),
+            };
+
+            let out_file_r2: Box<dyn FastQFileWriterTrait> = match outputs[1].to_str() {
+                Some("-") => Box::new(FastQFileWriter::to_stdout()),
+                _ => Box::new(FastQFileWriter::create(&outputs[1])?),
+            };
+
+            sequence_writer = Box::new(FastQPairedFilesWriter::new(
+                out_file_r1,
+                out_file_r2,
+                reverse_r2,
+            ));
         }
         _ => panic!("Too many output files! programming error."),
+    }
+
+    match file.to_str() {
+        Some("-") | None => {
+            let mut writer = XZSingleFileReader::from_stdin();
+            writer.decompress(&mut sequence_writer)?;
+        }
+        _ => {
+            let mut writer = XZSingleFileReader::open(&file)?;
+            writer.decompress(&mut sequence_writer)?;
+        }
     }
     Ok(())
 }

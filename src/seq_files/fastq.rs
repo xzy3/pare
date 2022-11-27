@@ -288,7 +288,7 @@ impl PairedFastQReader for FastQInterleavedFileReader {
 pub trait FastQFileWriterTrait {
     fn write_next(
         &mut self,
-        buf: FastQRead,
+        buf: &FastQRead,
         reverse_complement: bool,
     ) -> Result<bool, FastQFileError>;
 }
@@ -310,7 +310,7 @@ impl<W: Write> FastQFileWriter<W> {
 impl<W: Write> FastQFileWriterTrait for FastQFileWriter<W> {
     fn write_next(
         &mut self,
-        buf: FastQRead,
+        buf: &FastQRead,
         reverse_complement: bool,
     ) -> Result<bool, FastQFileError> {
         write!(self.stream, "@{}\n", buf.title)?;
@@ -349,7 +349,11 @@ impl FastQFileWriter<std::io::Stdout> {
 }
 
 pub trait PairedFastQWriter {
-    fn write_next(&mut self, buf_r1: FastQRead, buf_r2: FastQRead) -> Result<bool, FastQFileError>;
+    fn write_next(
+        &mut self,
+        buf_r1: &FastQRead,
+        buf_r2: &FastQRead,
+    ) -> Result<bool, FastQFileError>;
 }
 
 pub struct FastQPairedFilesWriter {
@@ -373,10 +377,14 @@ impl FastQPairedFilesWriter {
 }
 
 impl PairedFastQWriter for FastQPairedFilesWriter {
-    fn write_next(&mut self, buf_r1: FastQRead, buf_r2: FastQRead) -> Result<bool, FastQFileError> {
-        self.r1_stream.write_next(buf_r1, false)?;
+    fn write_next(
+        &mut self,
+        buf_r1: &FastQRead,
+        buf_r2: &FastQRead,
+    ) -> Result<bool, FastQFileError> {
+        self.r1_stream.write_next(&buf_r1, false)?;
         self.r2_stream
-            .write_next(buf_r2, self.reverse_complement_r2_nucleotides)?;
+            .write_next(&buf_r2, self.reverse_complement_r2_nucleotides)?;
         Ok(true)
     }
 }
@@ -399,10 +407,14 @@ impl FastQInterleavedFileWriter {
 }
 
 impl PairedFastQWriter for FastQInterleavedFileWriter {
-    fn write_next(&mut self, buf_r1: FastQRead, buf_r2: FastQRead) -> Result<bool, FastQFileError> {
-        self.stream.write_next(buf_r1, false)?;
+    fn write_next(
+        &mut self,
+        buf_r1: &FastQRead,
+        buf_r2: &FastQRead,
+    ) -> Result<bool, FastQFileError> {
+        self.stream.write_next(&buf_r1, false)?;
         self.stream
-            .write_next(buf_r2, self.reverse_complement_r2_nucleotides)?;
+            .write_next(&buf_r2, self.reverse_complement_r2_nucleotides)?;
 
         Ok(true)
     }
@@ -770,7 +782,7 @@ mod tests {
         let buf: Vec<u8> = Vec::with_capacity(FASTQ_RECORD.len());
 
         let mut writer = FastQFileWriter::new(BufWriter::new(buf));
-        writer.write_next(seq, false)?;
+        writer.write_next(&seq, false)?;
 
         let result = writer.stream.into_inner().unwrap();
         assert_eq!(FASTQ_RECORD.as_bytes(), result);
@@ -802,7 +814,7 @@ mod tests {
             true,
         );
 
-        writer.write_next(seq1, seq2)?;
+        writer.write_next(&seq1, &seq2)?;
         // really need to find a way to get to the underlying data. the type checker/lifetime
         // checker isn't happy with normal methods.
 
@@ -826,7 +838,7 @@ mod tests {
             true,
         );
 
-        writer.write_next(seq1, seq2)?;
+        writer.write_next(&seq1, &seq2)?;
 
         Ok(())
     }
