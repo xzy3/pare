@@ -39,7 +39,6 @@ pub struct FastQRead {
     pub letters: Vec<u8>,
     pub qualities: Vec<u8>,
     pub title: String,
-    pub sub_title: String,
 }
 
 impl FastQRead {
@@ -66,6 +65,8 @@ pub enum FastQFileError {
     NoTitleLine { line: u32 },
     #[error("Did not find expected line starting with '+'")]
     NoDescriptionLine,
+    #[error("Found + line with extra text. This is not handled by pare.")]
+    SubTitleFound,
     #[error("The quality sequence has unexpected characters")]
     InvalidQualityLetter,
     #[error("The nucleotide sequence and the quality sequence are different lengths")]
@@ -155,7 +156,10 @@ impl<R: Read> FastQFileReaderTrait for FastQFileReader<R> {
         if !sub_title.starts_with("+") {
             return Err(FastQFileError::NoDescriptionLine);
         }
-        sub_title = sub_title[1..].trim_end().to_string();
+
+        if sub_title.trim_end().len() > 1 {
+            return Err(FastQFileError::SubTitleFound);
+        }
 
         if self.stream.read_line(&mut quality_letters)? == 0 {
             return Err(FastQFileError::IncompleteRecord);
@@ -175,7 +179,6 @@ impl<R: Read> FastQFileReaderTrait for FastQFileReader<R> {
             letters: letters,
             qualities: qualities,
             title: title,
-            sub_title: sub_title,
         };
         self.line += 4;
         return Ok(true);
@@ -323,8 +326,7 @@ impl<W: Write> FastQFileWriterTrait for FastQFileWriter<W> {
         nuclotides_upper(&mut letters);
         self.stream.write(&letters)?;
 
-        self.stream.write(b"\n")?;
-        write!(self.stream, "+{}\n", buf.sub_title)?;
+        self.stream.write(b"\n+\n")?;
 
         let quals: Vec<u8> = buf.qualities.iter().map(|q| q + 32).collect();
 
@@ -439,7 +441,7 @@ mod tests {
     const FASTQ_RECORD: &str = concat!(
         "@HWI-EAS209_0006_FC706VJ:5:58:5894:21141#ATCACG/1\n",
         "TTAATTGGTAAATAAATCTCCTAATAGCTTAGATNTTACCTTNNNNNNNNNNTAGTTTCTTGAGATTTGTTGGGGGAGACATTTTTGTGATTGCCTTGAT\n",
-        "+HWI-EAS209_0006_FC706VJ:5:58:5894:21141#ATCACG/1\n",
+        "+\n",
         "efcfffffcfeefffcffffffddf`feed]`]_B__^__[YBBBBBBBBBBRTT\\]][]dddd`ddd^dddadd^BBBBBBBBBBBBBBBBBBBBBBBB\n"
     );
 
@@ -452,10 +454,6 @@ mod tests {
 
         assert_eq!(
             seq.title,
-            "HWI-EAS209_0006_FC706VJ:5:58:5894:21141#ATCACG/1"
-        );
-        assert_eq!(
-            seq.sub_title,
             "HWI-EAS209_0006_FC706VJ:5:58:5894:21141#ATCACG/1"
         );
         assert_eq!(
@@ -486,7 +484,7 @@ mod tests {
     const FASTQ_RECORD_INVALID_SEQUENCE_LENGTH: &str = concat!(
         "@HWI-EAS209_0006_FC706VJ:5:58:5894:21141#ATCACG/1\n",
         "TTAATTGGTAAATAAATCTCCTAATAGCTTAGATNTTACCTTNNNNNNNNNNTAGTTTCTTGAGATTTGTTGGGGGAGACATTTTTGTGATTGCCTTGA\n",
-        "+HWI-EAS209_0006_FC706VJ:5:58:5894:21141#ATCACG/1\n",
+        "+\n",
         "efcfffffcfeefffcffffffddf`feed]`]_B__^__[YBBBBBBBBBBRTT\\]][]dddd`ddd^dddadd^BBBBBBBBBBBBBBBBBBBBBBBB\n"
     );
 
@@ -508,7 +506,7 @@ mod tests {
     const FASTQ_RECORD_INVALID_QUALITY_LENGTH: &str = concat!(
         "@HWI-EAS209_0006_FC706VJ:5:58:5894:21141#ATCACG/1\n",
         "TTAATTGGTAAATAAATCTCCTAATAGCTTAGATNTTACCTTNNNNNNNNNNTAGTTTCTTGAGATTTGTTGGGGGAGACATTTTTGTGATTGCCTTGAT\n",
-        "+HWI-EAS209_0006_FC706VJ:5:58:5894:21141#ATCACG/1\n",
+        "+\n",
         "efcfffffcfeefffcffffffddf`feed]`]_B__^__[YBBBBBBBBBBRTT\\]][]dddd`ddd^dddadd^BBBBBBBBBBBBBBBBBBBBBBB\n"
     );
 
@@ -551,7 +549,7 @@ mod tests {
     const FASTQ_RECORD_NO_TITLE: &str = concat!(
         "HWI-EAS209_0006_FC706VJ:5:58:5894:21141#ATCACG/1\n",
         "TTAATTGGTAAATAAATCTCCTAATAGCTTAGATNTTACCTTNNNNNNNNNNTAGTTTCTTGAGATTTGTTGGGGGAGACATTTTTGTGATTGCCTTGAT\n",
-        "+HWI-EAS209_0006_FC706VJ:5:58:5894:21141#ATCACG/1\n",
+        "+\n",
         "efcfffffcfeefffcffffffddf`feed]`]_B__^__[YBBBBBBBBBBRTT\\]][]dddd`ddd^dddadd^BBBBBBBBBBBBBBBBBBBBBBB\n"
     );
 
@@ -571,7 +569,7 @@ mod tests {
     const FASTQ_RECORD_INVALID_NUCLEOTIDE: &str = concat!(
         "@HWI-EAS209_0006_FC706VJ:5:58:5894:21141#ATCACG/1\n",
         "TTAATTGGTAAATAAATCTCCTAATAGCTTAGATNTTACCTTNNNNNNzNNTAGTTTCTTGAGATTTGTTGGGGGAGACATTTTTGTGATTGCCTTGAT\n",
-        "+HWI-EAS209_0006_FC706VJ:5:58:5894:21141#ATCACG/1\n",
+        "+\n",
         "efcfffffcfeefffcffffffddf`feed]`]_B__^__[YBBBBBBBBBBRTT\\]][]dddd`ddd^dddadd^BBBBBBBBBBBBBBBBBBBBBBB\n"
     );
 
@@ -589,10 +587,28 @@ mod tests {
         ));
     }
 
+    const FASTQ_RECORD_SUBTITLE_INCLUDED: &str = concat!(
+        "@HWI-EAS209_0006_FC706VJ:5:58:5894:21141#ATCACG/1\n",
+        "TTAATTGGTAAATAAATCTCCTAATAGCTTAGATNTTACCTTNNNNNNNNNNTAGTTTCTTGAGATTTGTTGGGGGAGACATTTTTGTGATTGCCTTGAT\n",
+        "+HWI-EAS209_0006_FC706VJ:5:58:5894:21141#ATCACG/1\n",
+        "efcfffffcfeefffcffffffddf`feed]`]_B__^__[YBBBBBBBBBBRTT\\]][]dddd`ddd^dddadd^BBBBBBBBBBBBBBBBBBBBBBBB\n"
+    );
+
+    #[test]
+    fn test_subtitle_included() {
+        let mut reader =
+            FastQFileReader::new(BufReader::new(FASTQ_RECORD_SUBTITLE_INCLUDED.as_bytes()));
+        let mut seq = FastQRead::default();
+
+        let actual = reader.read_next(&mut seq);
+        assert!(actual.is_err());
+        assert!(matches!(actual.unwrap_err(), FastQFileError::SubTitleFound));
+    }
+
     const FASTQ_RECORD_INVALID_QUALITY: &str = concat!(
         "@HWI-EAS209_0006_FC706VJ:5:58:5894:21141#ATCACG/1\n",
         "TTAATTGGTAAATAAATCTCCTAATAGCTTAGATNTTACCTTNNNNNNNNNTAGTTTCTTGAGATTTGTTGGGGGAGACATTTTTGTGATTGCCTTGAT\n",
-        "+HWI-EAS209_0006_FC706VJ:5:58:5894:21141#ATCACG/1\n",
+        "+\n",
         "efcfffffcfeefffcffffffddf`feed]`]_B__^__[YBBBBBB BBBRTT\\]][]dddd`ddd^dddadd^BBBBBBBBBBBBBBBBBBBBBBB\n"
     );
 
@@ -613,7 +629,7 @@ mod tests {
     const FASTQ_RECORD_TRUNCATED_QUALITY: &str = concat!(
         "@HWI-EAS209_0006_FC706VJ:5:58:5894:21141#ATCACG/1\n",
         "TTAATTGGTAAATAAATCTCCTAATAGCTTAGATNTTACCTTNNNNNNNNNTAGTTTCTTGAGATTTGTTGGGGGAGACATTTTTGTGATTGCCTTGAT\n",
-        "+HWI-EAS209_0006_FC706VJ:5:58:5894:21141#ATCACG/1\n",
+        "+\n",
     );
 
     const FASTQ_RECORD_TRUNCATED_DESCRIPTION: &str = concat!(
@@ -665,7 +681,7 @@ mod tests {
     const FASTQ_RECORD_FASTA_RECORD: &str = concat!(
         "@HWI-EAS209_0006_FC706VJ:5:58:5894:21141#ATCACG/1\n",
         "TTAATTGGTAAATAAATCTCCTAATAGCTTAGATNTTACCTTNNNNNNNNNNTAGTTTCTTGAGATTTGTTGGGGGAGACATTTTTGTGATTGCCTTGAT\n",
-        "+HWI-EAS209_0006_FC706VJ:5:58:5894:21141#ATCACG/1\n",
+        "+\n",
         "efcfffffcfeefffcffffffddf`feed]`]_B__^__[YBBBBBBBBBBRTT\\]][]dddd`ddd^dddadd^BBBBBBBBBBBBBBBBBBBBBBBB\n",
         ">HWI-EAS209_0006_FC706VJ:5:58:5894:21141#ATCACG/1\n",
         "TTAATTGGTAAATAAATCTCCTAATAGCTTAGATNTTACCTTNNNNNNNNNNTAGTTTCTTGAGATTTGTTGGGGGAGACATTTTTGTGATTGCCTTGAT\n",
