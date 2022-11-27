@@ -11,6 +11,8 @@ use xz2::write::XzEncoder;
 
 use crate::seq_files::fastq::{FastQFileError, FastQRead, PairedFastQReader, PairedFastQWriter};
 
+const FILE_VERSION: &'static [u8] = &*b"PARE lzma_single_file v1\xFF";
+
 #[derive(Error, Debug)]
 pub enum XZSingleFileError {
     #[error("IO error while reading fastq file")]
@@ -32,6 +34,8 @@ pub enum XZSingleFileError {
 
     #[error("EOF caused Incomplete record")]
     IncompleteRecord,
+    #[error("Could not find the expected version string")]
+    MissingVersion,
 }
 
 pub struct XZSingleFileWriter<W: Write> {
@@ -65,6 +69,8 @@ impl<W: Write> XZSingleFileWriter<W> {
     ) -> Result<(), XZSingleFileError> {
         let mut r1 = FastQRead::default();
         let mut r2 = FastQRead::default();
+
+        self.encoder.write(FILE_VERSION)?;
 
         loop {
             if !reader.read_next(&mut r1, &mut r2)? {
@@ -105,6 +111,19 @@ impl<R: Read> XZSingleFileReader<R> {
         XZSingleFileReader {
             decoder: BufReader::new(XzDecoder::<R>::new(source)),
         }
+    }
+
+    fn check_magic(&mut self) -> Result<(), XZSingleFileError> {
+        let mut buffer = vec![];
+        if self.decoder.read_until(b'\xFF', &mut buffer)? == 0 {
+            return Err(XZSingleFileError::MissingVersion);
+        }
+
+        if buffer != FILE_VERSION {
+            return Err(XZSingleFileError::MissingVersion);
+        }
+
+        Ok(())
     }
 
     fn read_string(&mut self, record: &mut String) -> Result<bool, XZSingleFileError> {
@@ -156,11 +175,21 @@ impl<R: Read> XZSingleFileReader<R> {
         r1.qualities.clear();
         r1.qualities.resize(r1.letters.len(), 0);
 
-        self.decoder.read_exact(&mut r1.qualities[..])?;
+        match self.decoder.read_exact(&mut r1.qualities[..]) {
+            Ok(()) => {}
+            _ => {
+                return Err(XZSingleFileError::IncompleteRecord);
+            }
+        }
 
         r2.qualities.clear();
         r2.qualities.resize(r2.letters.len(), 0);
-        self.decoder.read_exact(&mut r2.qualities[..])?;
+        match self.decoder.read_exact(&mut r2.qualities[..]) {
+            Ok(()) => {}
+            _ => {
+                return Err(XZSingleFileError::IncompleteRecord);
+            }
+        }
 
         Ok(true)
     }
@@ -171,6 +200,8 @@ impl<R: Read> XZSingleFileReader<R> {
     ) -> Result<(), XZSingleFileError> {
         let mut r1 = FastQRead::default();
         let mut r2 = FastQRead::default();
+
+        self.check_magic()?;
 
         loop {
             if !self.read_next(&mut r1, &mut r2)? {
