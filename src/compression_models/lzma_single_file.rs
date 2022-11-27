@@ -75,10 +75,8 @@ impl<W: Write> XZSingleFileWriter<W> {
             self.write_string(&r2.title)?;
             self.write_u8(&r1.letters)?;
             self.write_u8(&r2.letters)?;
-            self.write_string(&r1.sub_title)?;
-            self.write_string(&r2.sub_title)?;
-            self.write_u8(&r1.qualities)?;
-            self.write_u8(&r2.qualities)?;
+            self.encoder.write(&r1.qualities)?;
+            self.encoder.write(&r2.qualities)?;
         }
         Ok(())
     }
@@ -155,21 +153,14 @@ impl<R: Read> XZSingleFileReader<R> {
             return Err(XZSingleFileError::IncompleteRecord);
         }
 
-        if !self.read_string(&mut r1.sub_title)? {
-            return Err(XZSingleFileError::IncompleteRecord);
-        }
+        r1.qualities.clear();
+        r1.qualities.resize(r1.letters.len(), 0);
 
-        if !self.read_string(&mut r2.sub_title)? {
-            return Err(XZSingleFileError::IncompleteRecord);
-        }
+        self.decoder.read_exact(&mut r1.qualities[..])?;
 
-        if !self.read_u8(&mut r1.qualities)? {
-            return Err(XZSingleFileError::IncompleteRecord);
-        }
-
-        if !self.read_u8(&mut r2.qualities)? {
-            return Err(XZSingleFileError::IncompleteRecord);
-        }
+        r2.qualities.clear();
+        r2.qualities.resize(r2.letters.len(), 0);
+        self.decoder.read_exact(&mut r2.qualities[..])?;
 
         Ok(true)
     }
