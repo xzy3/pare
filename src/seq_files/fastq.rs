@@ -42,13 +42,6 @@ pub struct FastQRead {
 }
 
 impl FastQRead {
-    pub fn new(title: &str) -> Self {
-        let mut read = Self::default();
-
-        read.title = String::from(title);
-        read
-    }
-
     pub fn reverse_complement_nucleotides(&mut self) {
         reverse_complement_nucleotides(&mut self.letters);
     }

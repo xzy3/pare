@@ -2,6 +2,7 @@ use std::fs::File;
 use std::io::{BufRead, BufReader, Cursor, Read, Seek, Write};
 use std::path::Path;
 
+use serde_json::json;
 use tar::{Builder, Header};
 use tempfile::SpooledTempFile;
 use xz2::read::XzDecoder;
@@ -13,59 +14,30 @@ use crate::seq_files::fastq::{FastQRead, PairedFastQReader, PairedFastQWriter};
 const FILE_VERSION: &'static [u8] = &*b"PARE lzma_multi_stream v1\xFF";
 
 pub struct XZMultiStreamWriter<W: Write> {
-    sink: Builder<XzEncoder<W>>,
+    sink: PareArchiveEncoder<W>,
 }
 
 impl<W: Write> XZMultiStreamWriter<W> {
     pub fn new(sink: W) -> Self {
         XZMultiStreamWriter {
-            sink: Builder::new(XzEncoder::<W>::new(sink, 9)),
+            sink: PareArchiveEncoder::<W>::new(sink),
         }
-    }
-
-    fn write_metadata(&mut self) -> Result<(), CompressionModelError> {
-        let mut header = Header::new_gnu();
-        header.set_size(FILE_VERSION.len() as u64);
-        header.set_path("metadata")?;
-        header.set_cksum();
-
-        self.sink.append(&header, Cursor::new(FILE_VERSION))?;
-
-        Ok(())
-    }
-
-    fn finish_file(
-        &mut self,
-        spool: XzEncoder<SpooledTempFile>,
-        path: &str,
-    ) -> Result<(), CompressionModelError> {
-        let mut finished_spool = spool.finish()?;
-
-        let mut header = Header::new_gnu();
-        header.set_size(finished_spool.stream_position()?);
-        header.set_path(path)?;
-        header.set_cksum();
-
-        finished_spool.rewind()?;
-        let mut reader = XzDecoder::new(finished_spool);
-
-        self.sink.append(&header, reader)?;
-
-        Ok(())
     }
 }
 
 impl<W: Write> EncoderModel for XZMultiStreamWriter<W> {
-    fn compress(
-        &mut self,
-        reader: &mut Box<dyn PairedFastQReader>,
-    ) -> Result<(), CompressionModelError> {
+    fn compress(&mut self, reader: &mut Box<dyn PairedFastQReader>) -> Result<()> {
         let mut r1 = FastQRead::default();
         let mut r2 = FastQRead::default();
 
-        let mut title_spool = XzEncoder::new(SpooledTempFile::new(4096), 1);
-        let mut nucleotides_spool = XzEncoder::new(SpooledTempFile::new(4096), 1);
-        let mut qualities_spool = XzEncoder::new(SpooledTempFile::new(4096), 1);
+        let mut title_spool = XzEncoder::new(SpooledTempFile::new(4096), 9);
+        let mut nucleotides_spool = XzEncoder::new(SpooledTempFile::new(4096), 9);
+        let mut qualities_spool = XzEncoder::new(SpooledTempFile::new(4096), 9);
+
+        self.sink.write_metadata(json!({
+            "model": "lzma_multi_stream",
+            "version": 1,
+        }))?;
 
         loop {
             if !reader.read_next(&mut r1, &mut r2)? {
@@ -85,9 +57,9 @@ impl<W: Write> EncoderModel for XZMultiStreamWriter<W> {
             qualities_spool.write(&r2.qualities)?;
         }
 
-        self.finish_file(title_spool, "titles")?;
-        self.finish_file(nucleotides_spool, "nucleotides")?;
-        self.finish_file(qualities_spool, "qualities")?;
+        self.sink.write_xz_spool(title_spool, "titles")?;
+        self.sink.write_xz_spool(nucleotides_spool, "nucleotides")?;
+        self.sink.write_xz_spool(qualities_spool, "qualities")?;
         self.sink.finish()?;
 
         Ok(())
@@ -101,7 +73,7 @@ impl XZMultiStreamWriter<std::io::Stdout> {
 }
 
 impl XZMultiStreamWriter<File> {
-    pub fn create<P: AsRef<Path>>(path: &P) -> Result<Self, std::io::Error> {
+    pub fn create<P: AsRef<Path>>(path: &P) -> Result<Self> {
         let file = File::create(path)?;
         Ok(XZMultiStreamWriter::new(file))
     }
@@ -119,7 +91,7 @@ impl<R: Read> XZMultiStreamReader<R> {
         }
     }
 
-    fn check_magic(&mut self) -> Result<(), CompressionModelError> {
+    fn check_magic(&mut self) -> Result<()> {
         let mut buffer = vec![];
         if self.decoder.read_until(b'\xFF', &mut buffer)? == 0 {
             return Err(CompressionModelError::MissingVersion);
@@ -132,7 +104,7 @@ impl<R: Read> XZMultiStreamReader<R> {
         Ok(())
     }
 
-    fn read_string(&mut self, record: &mut String) -> Result<bool, CompressionModelError> {
+    fn read_string(&mut self, record: &mut String) -> Result<bool> {
         let mut buffer = vec![];
 
         let ret = self.read_u8(&mut buffer)?;
@@ -141,7 +113,7 @@ impl<R: Read> XZMultiStreamReader<R> {
         Ok(ret)
     }
 
-    fn read_u8(&mut self, record: &mut Vec<u8>) -> Result<bool, CompressionModelError> {
+    fn read_u8(&mut self, record: &mut Vec<u8>) -> Result<bool> {
         record.clear();
         if self.decoder.read_until(b'\xFF', record)? == 0 {
             return Ok(false);
@@ -157,11 +129,7 @@ impl<R: Read> XZMultiStreamReader<R> {
         Ok(true)
     }
 
-    fn read_next(
-        &mut self,
-        r1: &mut FastQRead,
-        r2: &mut FastQRead,
-    ) -> Result<bool, CompressionModelError> {
+    fn read_next(&mut self, r1: &mut FastQRead, r2: &mut FastQRead) -> Result<bool> {
         if !self.read_string(&mut r1.title)? {
             return Ok(false);
         }
@@ -202,10 +170,7 @@ impl<R: Read> XZMultiStreamReader<R> {
 }
 
 impl<R: Read> DecoderModel for XZMultiStreamReader<R> {
-    fn decompress(
-        &mut self,
-        writer: &mut Box<dyn PairedFastQWriter>,
-    ) -> Result<(), CompressionModelError> {
+    fn decompress(&mut self, writer: &mut Box<dyn PairedFastQWriter>) -> Result<()> {
         let mut r1 = FastQRead::default();
         let mut r2 = FastQRead::default();
 
@@ -228,7 +193,7 @@ impl XZMultiStreamReader<std::io::Stdin> {
 }
 
 impl XZMultiStreamReader<File> {
-    pub fn open<P: AsRef<Path>>(path: &P) -> Result<Self, std::io::Error> {
+    pub fn open<P: AsRef<Path>>(path: &P) -> Result<Self> {
         let file = File::open(path)?;
         Ok(XZMultiStreamReader::new(file))
     }
