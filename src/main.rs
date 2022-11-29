@@ -47,6 +47,8 @@ enum Commands {
         outputs: Vec<OsString>,
         #[arg(short, long, action, help = "Don't reverse complement R2")]
         reverse_r2: bool,
+        #[arg(short, long, value_enum, help = "which model to use")]
+        model: Option<Model>,
     },
     #[command()]
     Cite {},
@@ -116,6 +118,7 @@ fn decompress(
     file: OsString,
     outputs: Vec<OsString>,
     reverse_r2: bool,
+    model: Option<Model>,
 ) -> Result<(), CompressionModelError> {
     let mut sequence_writer: Box<dyn PairedFastQWriter>;
     match outputs.len() {
@@ -150,12 +153,18 @@ fn decompress(
     }
 
     let mut writer: Box<dyn DecoderModel>;
-    match file.to_str() {
-        Some("-") | None => {
+    match (file.to_str(), model) {
+        (Some("-") | None, Some(Model::LZMA) | None) => {
             writer = Box::new(XZSingleFileReader::from_stdin()?);
         }
-        _ => {
+        (_, Some(Model::LZMA) | None) => {
             writer = Box::new(XZSingleFileReader::open(&file)?);
+        }
+        (Some("-") | None, Some(Model::LZMAMulti)) => {
+            writer = Box::new(XZMultiStreamReader::from_stdin()?);
+        }
+        (_, Some(Model::LZMAMulti)) => {
+            writer = Box::new(XZMultiStreamReader::open(&file)?);
         }
     }
     writer.decompress(&mut sequence_writer)?;
@@ -177,7 +186,8 @@ fn main() -> Result<(), CompressionModelError> {
             file,
             outputs,
             reverse_r2,
-        } => decompress(file, outputs, reverse_r2)?,
+            model,
+        } => decompress(file, outputs, reverse_r2, model)?,
         Commands::Cite {} => {
             println!("print out a citation here");
         }

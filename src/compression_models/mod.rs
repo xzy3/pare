@@ -126,6 +126,7 @@ impl<R: Read> PareArchiveDecoder<R> {
     }
 
     pub fn get_metadata(&mut self) -> Result<serde_json::Value> {
+        //TODO: handle not finding the metadata file
         let cont = read_to_string(self.tmpdir.path().join("metadata"))?;
         Ok(serde_json::from_str(&cont)?)
     }

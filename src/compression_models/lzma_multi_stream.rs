@@ -3,7 +3,6 @@ use std::io::{BufRead, BufReader, Cursor, Read, Seek, Write};
 use std::path::Path;
 
 use serde_json::json;
-use tar::{Builder, Header};
 use tempfile::SpooledTempFile;
 use xz2::read::XzDecoder;
 use xz2::write::XzEncoder;
@@ -81,46 +80,46 @@ impl XZMultiStreamWriter<File> {
 
 // readers
 pub struct XZMultiStreamReader<R: Read> {
-    decoder: BufReader<XzDecoder<R>>,
+    arc: PareArchiveDecoder<R>,
 }
 
+type XzBufReader = BufReader<XzDecoder<File>>;
+
 impl<R: Read> XZMultiStreamReader<R> {
-    pub fn new(source: R) -> Self {
-        XZMultiStreamReader {
-            decoder: BufReader::new(XzDecoder::<R>::new(source)),
-        }
+    pub fn new(source: R) -> Result<Self> {
+        let arc = PareArchiveDecoder::<R>::new(source)?;
+
+        Ok(XZMultiStreamReader { arc: arc })
     }
 
     fn check_magic(&mut self) -> Result<()> {
-        let mut buffer = vec![];
-        if self.decoder.read_until(b'\xFF', &mut buffer)? == 0 {
-            return Err(CompressionModelError::MissingVersion);
-        }
-
-        if buffer != FILE_VERSION {
-            return Err(CompressionModelError::MissingVersion);
+        let metadata = self.arc.get_metadata()?;
+        if metadata["model"] != "lzma_multi_stream" || metadata["version"] != 1 {
+            return Err(CompressionModelError::OpenedWithWrongModel);
         }
 
         Ok(())
     }
 
-    fn read_string(&mut self, record: &mut String) -> Result<bool> {
-        let mut buffer = vec![];
-
-        let ret = self.read_u8(&mut buffer)?;
+    fn read_line(&mut self, source: &mut XzBufReader, record: &mut String) -> Result<bool> {
         record.clear();
-        *record = String::from_utf8(buffer)?;
-        Ok(ret)
+        if source.read_line(record)? == 0 {
+            return Ok(false);
+        }
+
+        record.pop();
+
+        Ok(true)
     }
 
-    fn read_u8(&mut self, record: &mut Vec<u8>) -> Result<bool> {
+    fn read_u8(&mut self, source: &mut XzBufReader, record: &mut Vec<u8>) -> Result<bool> {
         record.clear();
-        if self.decoder.read_until(b'\xFF', record)? == 0 {
+        if source.read_until(b'\n', record)? == 0 {
             return Ok(false);
         }
 
         match record.pop() {
-            Some(b'\xFF') => {}
+            Some(b'\n') => {}
             _ => {
                 return Err(CompressionModelError::IncompleteRecord);
             }
@@ -129,42 +128,16 @@ impl<R: Read> XZMultiStreamReader<R> {
         Ok(true)
     }
 
-    fn read_next(&mut self, r1: &mut FastQRead, r2: &mut FastQRead) -> Result<bool> {
-        if !self.read_string(&mut r1.title)? {
-            return Ok(false);
-        }
+    fn read_exact(
+        &mut self,
+        source: &mut XzDecoder<File>,
+        l: usize,
+        record: &mut Vec<u8>,
+    ) -> Result<bool> {
+        record.clear();
+        record.resize(l, 0);
 
-        if !self.read_string(&mut r2.title)? {
-            return Err(CompressionModelError::IncompleteRecord);
-        }
-
-        if !self.read_u8(&mut r1.letters)? {
-            return Err(CompressionModelError::IncompleteRecord);
-        }
-
-        if !self.read_u8(&mut r2.letters)? {
-            return Err(CompressionModelError::IncompleteRecord);
-        }
-
-        r1.qualities.clear();
-        r1.qualities.resize(r1.letters.len(), 0);
-
-        match self.decoder.read_exact(&mut r1.qualities[..]) {
-            Ok(()) => {}
-            _ => {
-                return Err(CompressionModelError::IncompleteRecord);
-            }
-        }
-
-        r2.qualities.clear();
-        r2.qualities.resize(r2.letters.len(), 0);
-        match self.decoder.read_exact(&mut r2.qualities[..]) {
-            Ok(()) => {}
-            _ => {
-                return Err(CompressionModelError::IncompleteRecord);
-            }
-        }
-
+        source.read_exact(&mut record[..])?;
         Ok(true)
     }
 }
@@ -176,10 +149,30 @@ impl<R: Read> DecoderModel for XZMultiStreamReader<R> {
 
         self.check_magic()?;
 
+        let mut title_stream = BufReader::new(self.arc.get_xz_stream("titles")?);
+        let mut nuc_stream = BufReader::new(self.arc.get_xz_stream("nucleotides")?);
+        let mut qual_stream = self.arc.get_xz_stream("qualities")?;
+
         loop {
-            if !self.read_next(&mut r1, &mut r2)? {
+            if !self.read_line(&mut title_stream, &mut r1.title)? {
                 break;
             }
+
+            if !self.read_line(&mut title_stream, &mut r2.title)? {
+                return Err(CompressionModelError::IncompleteRecord);
+            }
+
+            if !self.read_u8(&mut nuc_stream, &mut r1.letters)? {
+                return Err(CompressionModelError::IncompleteRecord);
+            }
+
+            if !self.read_u8(&mut nuc_stream, &mut r2.letters)? {
+                return Err(CompressionModelError::IncompleteRecord);
+            }
+
+            self.read_exact(&mut qual_stream, r1.letters.len(), &mut r1.qualities)?;
+            self.read_exact(&mut qual_stream, r2.letters.len(), &mut r2.qualities)?;
+
             writer.write_next(&r1, &r2)?;
         }
         Ok(())
@@ -187,7 +180,7 @@ impl<R: Read> DecoderModel for XZMultiStreamReader<R> {
 }
 
 impl XZMultiStreamReader<std::io::Stdin> {
-    pub fn from_stdin() -> Self {
+    pub fn from_stdin() -> Result<Self> {
         XZMultiStreamReader::new(std::io::stdin())
     }
 }
@@ -195,6 +188,6 @@ impl XZMultiStreamReader<std::io::Stdin> {
 impl XZMultiStreamReader<File> {
     pub fn open<P: AsRef<Path>>(path: &P) -> Result<Self> {
         let file = File::open(path)?;
-        Ok(XZMultiStreamReader::new(file))
+        XZMultiStreamReader::new(file)
     }
 }
