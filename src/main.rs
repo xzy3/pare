@@ -45,13 +45,7 @@ enum Commands {
         file: OsString,
         #[arg(default_value = "-", num_args(1..3))]
         outputs: Vec<OsString>,
-        #[arg(
-            short,
-            long,
-            action,
-            default_value = "lzma",
-            help = "Don't reverse complement R2"
-        )]
+        #[arg(short, long, action, help = "Don't reverse complement R2")]
         reverse_r2: bool,
     },
     #[command()]
@@ -155,16 +149,17 @@ fn decompress(
         _ => panic!("Too many output files! programming error."),
     }
 
+    let mut writer: Box<dyn DecoderModel>;
     match file.to_str() {
         Some("-") | None => {
-            let mut writer = XZSingleFileReader::from_stdin();
-            writer.decompress(&mut sequence_writer)?;
+            writer = Box::new(XZSingleFileReader::from_stdin()?);
         }
         _ => {
-            let mut writer = XZSingleFileReader::open(&file)?;
-            writer.decompress(&mut sequence_writer)?;
+            writer = Box::new(XZSingleFileReader::open(&file)?);
         }
     }
+    writer.decompress(&mut sequence_writer)?;
+
     Ok(())
 }
 

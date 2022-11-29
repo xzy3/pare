@@ -83,27 +83,25 @@ impl XZSingleFileWriter<File> {
 
 // readers
 pub struct XZSingleFileReader<R: Read> {
-    decoder: BufReader<XzDecoder<R>>,
+    arc: PareArchiveDecoder<R>,
+    decoder: BufReader<XzDecoder<File>>,
 }
 
 impl<R: Read> XZSingleFileReader<R> {
-    pub fn new(source: R) -> Self {
-        XZSingleFileReader {
-            decoder: BufReader::new(XzDecoder::<R>::new(source)),
-        }
-    }
+    pub fn new(source: R) -> Result<Self> {
+        let mut arc = PareArchiveDecoder::new(source)?;
 
-    fn check_magic(&mut self) -> Result<()> {
-        let mut buffer = vec![];
-        if self.decoder.read_until(b'\xFF', &mut buffer)? == 0 {
-            return Err(CompressionModelError::MissingVersion);
+        let metadata = arc.get_metadata()?;
+        if metadata["model"] != "lzma_single_stream" || metadata["version"] != 1 {
+            return Err(CompressionModelError::OpenedWithWrongModel);
         }
 
-        if buffer != FILE_VERSION {
-            return Err(CompressionModelError::MissingVersion);
-        }
+        let source_stream = arc.get_stream("data")?;
 
-        Ok(())
+        Ok(XZSingleFileReader {
+            arc: arc,
+            decoder: BufReader::new(XzDecoder::new(source_stream)),
+        })
     }
 
     fn read_string(&mut self, record: &mut String) -> Result<bool> {
@@ -176,8 +174,6 @@ impl<R: Read> DecoderModel for XZSingleFileReader<R> {
         let mut r1 = FastQRead::default();
         let mut r2 = FastQRead::default();
 
-        self.check_magic()?;
-
         loop {
             if !self.read_next(&mut r1, &mut r2)? {
                 break;
@@ -189,14 +185,14 @@ impl<R: Read> DecoderModel for XZSingleFileReader<R> {
 }
 
 impl XZSingleFileReader<std::io::Stdin> {
-    pub fn from_stdin() -> Self {
-        XZSingleFileReader::new(std::io::stdin())
+    pub fn from_stdin() -> Result<Self> {
+        Ok(XZSingleFileReader::new(std::io::stdin())?)
     }
 }
 
 impl XZSingleFileReader<File> {
     pub fn open<P: AsRef<Path>>(path: &P) -> Result<Self> {
         let file = File::open(path)?;
-        Ok(XZSingleFileReader::new(file))
+        Ok(XZSingleFileReader::new(file)?)
     }
 }
