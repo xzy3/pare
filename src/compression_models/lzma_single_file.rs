@@ -9,8 +9,6 @@ use xz2::write::XzEncoder;
 use crate::compression_models::*;
 use crate::seq_files::fastq::{FastQRead, PairedFastQReader, PairedFastQWriter};
 
-const FILE_VERSION: &'static [u8] = &*b"PARE lzma_single_file v1\xFF";
-
 pub struct XZSingleFileWriter<W: Write> {
     sink: PareArchiveEncoder<W>,
 }
@@ -47,7 +45,7 @@ impl<W: Write> EncoderModel for XZSingleFileWriter<W> {
         let mut spool = XzEncoder::new(SpooledTempFile::new(4096), 9);
 
         self.sink.write_metadata(json!({
-            "model": "lzma_single_stream",
+            "model": CompressionModel::LZMASingle.as_str(),
             "version": 1,
         }))?;
 
@@ -92,7 +90,7 @@ impl<R: Read> XZSingleFileReader<R> {
         let mut arc = PareArchiveDecoder::new(source)?;
 
         let metadata = arc.get_metadata()?;
-        if metadata["model"] != "lzma_single_stream" || metadata["version"] != 1 {
+        if metadata["model"] != CompressionModel::LZMASingle.as_str() || metadata["version"] != 1 {
             return Err(CompressionModelError::OpenedWithWrongModel);
         }
 

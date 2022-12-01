@@ -22,6 +22,15 @@ enum CompressionModel {
     LZMAMulti,
 }
 
+impl CompressionModel {
+    fn as_str(&self) -> &'static str {
+        match self {
+            CompressionModel::LZMASingle => "lzma_single_stream",
+            CompressionModel::LZMAMulti => "lzma_multi_stream",
+        }
+    }
+}
+
 #[derive(Error, Debug)]
 pub enum CompressionModelError {
     #[error("IO error while reading fastq file")]

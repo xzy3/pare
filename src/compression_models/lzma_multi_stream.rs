@@ -1,5 +1,5 @@
 use std::fs::File;
-use std::io::{BufRead, BufReader, Cursor, Read, Seek, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::path::Path;
 
 use serde_json::json;
@@ -9,8 +9,6 @@ use xz2::write::XzEncoder;
 
 use crate::compression_models::*;
 use crate::seq_files::fastq::{FastQRead, PairedFastQReader, PairedFastQWriter};
-
-const FILE_VERSION: &'static [u8] = &*b"PARE lzma_multi_stream v1\xFF";
 
 pub struct XZMultiStreamWriter<W: Write> {
     sink: PareArchiveEncoder<W>,
@@ -34,7 +32,7 @@ impl<W: Write> EncoderModel for XZMultiStreamWriter<W> {
         let mut qualities_spool = XzEncoder::new(SpooledTempFile::new(4096), 9);
 
         self.sink.write_metadata(json!({
-            "model": "lzma_multi_stream",
+            "model": CompressionModel::LZMAMulti.as_str(),
             "version": 1,
         }))?;
 
@@ -94,7 +92,7 @@ impl<R: Read> XZMultiStreamReader<R> {
 
     fn check_magic(&mut self) -> Result<()> {
         let metadata = self.arc.get_metadata()?;
-        if metadata["model"] != "lzma_multi_stream" || metadata["version"] != 1 {
+        if metadata["model"] != CompressionModel::LZMAMulti.as_str() || metadata["version"] != 1 {
             return Err(CompressionModelError::OpenedWithWrongModel);
         }
 
