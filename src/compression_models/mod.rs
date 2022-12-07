@@ -1,11 +1,13 @@
 pub mod lzma_multi_stream;
 pub mod lzma_single_file;
 
-use std::fs::{read_to_string, File};
+use std::fs;
+use std::fs::File;
 use std::io::{Cursor, Read, Seek, SeekFrom, Write};
 use std::string::FromUtf8Error;
 
-use serde_json;
+use bson::Document;
+use bson::{de, document, ser};
 use tar::{Archive, Builder, Header};
 use tempfile::{tempdir, SpooledTempFile, TempDir};
 use thiserror::Error;
@@ -44,10 +46,22 @@ pub enum CompressionModelError {
         source: FromUtf8Error,
     },
 
-    #[error("metadata error in parsing JSON")]
+    #[error("metadata error in parsing BSON")]
     MetadataError {
         #[from]
-        source: serde_json::Error,
+        source: de::Error,
+    },
+
+    #[error("metadata error in serializing BSON")]
+    MetadataSerError {
+        #[from]
+        source: ser::Error,
+    },
+
+    #[error("error parsing metadata BSON")]
+    MetadataAccessError {
+        #[from]
+        source: document::ValueAccessError,
     },
 
     #[error("Invalid fastq file")]
@@ -75,9 +89,9 @@ impl<W: Write> PareArchiveEncoder<W> {
         }
     }
 
-    pub fn write_metadata(&mut self, metadata: serde_json::Value) -> Result<()> {
+    pub fn write_metadata(&mut self, metadata: Document) -> Result<()> {
         let mut buffer: Vec<u8> = Vec::new();
-        serde_json::to_writer(&mut buffer, &metadata)?;
+        metadata.to_writer(&mut buffer)?;
 
         self.write_stream(&mut Cursor::new(buffer), "metadata")?;
         Ok(())
@@ -134,10 +148,10 @@ impl<R: Read> PareArchiveDecoder<R> {
         Ok(XzDecoder::new(self.get_stream(path)?))
     }
 
-    pub fn get_metadata(&mut self) -> Result<serde_json::Value> {
+    pub fn get_metadata(&mut self) -> Result<Document> {
         //TODO: handle not finding the metadata file
-        let cont = read_to_string(self.tmpdir.path().join("metadata"))?;
-        Ok(serde_json::from_str(&cont)?)
+        let cont = fs::read(self.tmpdir.path().join("metadata"))?;
+        Ok(Document::from_reader(&mut Cursor::new(cont))?)
     }
 }
 

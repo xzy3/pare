@@ -2,7 +2,7 @@ use std::fs::File;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::Path;
 
-use serde_json::json;
+use bson::doc;
 use xz2::read::XzDecoder;
 use xz2::write::XzEncoder;
 
@@ -44,10 +44,10 @@ impl<W: Write> EncoderModel for XZSingleFileWriter<W> {
 
         let mut spool = XzEncoder::new(SpooledTempFile::new(4096), 9);
 
-        self.sink.write_metadata(json!({
+        self.sink.write_metadata(doc! {
             "model": CompressionModel::LZMASingle.as_str(),
             "version": 1,
-        }))?;
+        })?;
 
         loop {
             if !reader.read_next(&mut r1, &mut r2)? {
@@ -90,7 +90,9 @@ impl<R: Read> XZSingleFileReader<R> {
         let mut arc = PareArchiveDecoder::new(source)?;
 
         let metadata = arc.get_metadata()?;
-        if metadata["model"] != CompressionModel::LZMASingle.as_str() || metadata["version"] != 1 {
+        if metadata.get_str("model")? != CompressionModel::LZMASingle.as_str()
+            || metadata.get_i64("version")? != 1
+        {
             return Err(CompressionModelError::OpenedWithWrongModel);
         }
 

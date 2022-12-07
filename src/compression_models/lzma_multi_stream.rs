@@ -2,7 +2,7 @@ use std::fs::File;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::Path;
 
-use serde_json::json;
+use bson::doc;
 use tempfile::SpooledTempFile;
 use xz2::read::XzDecoder;
 use xz2::write::XzEncoder;
@@ -31,10 +31,10 @@ impl<W: Write> EncoderModel for XZMultiStreamWriter<W> {
         let mut nucleotides_spool = XzEncoder::new(SpooledTempFile::new(4096), 9);
         let mut qualities_spool = XzEncoder::new(SpooledTempFile::new(4096), 9);
 
-        self.sink.write_metadata(json!({
+        self.sink.write_metadata(doc! {
             "model": CompressionModel::LZMAMulti.as_str(),
             "version": 1,
-        }))?;
+        })?;
 
         loop {
             if !reader.read_next(&mut r1, &mut r2)? {
@@ -92,7 +92,9 @@ impl<R: Read> XZMultiStreamReader<R> {
 
     fn check_magic(&mut self) -> Result<()> {
         let metadata = self.arc.get_metadata()?;
-        if metadata["model"] != CompressionModel::LZMAMulti.as_str() || metadata["version"] != 1 {
+        if metadata.get_str("model")? != CompressionModel::LZMAMulti.as_str()
+            || metadata.get_i64("version")? != 1
+        {
             return Err(CompressionModelError::OpenedWithWrongModel);
         }
 
